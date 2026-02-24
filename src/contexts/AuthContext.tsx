@@ -35,6 +35,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     loadStoredUser();
+    // Fallback: never block app for more than 3s (e.g. if AsyncStorage hangs)
+    const t = setTimeout(() => setIsLoading(false), 3000);
+    return () => clearTimeout(t);
   }, [loadStoredUser]);
 
   const login = useCallback(async (email: string, password: string) => {
