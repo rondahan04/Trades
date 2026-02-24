@@ -6,7 +6,7 @@ import { colors } from '../theme';
 
 export type SwipeStackParamList = {
   SwipeDeck: undefined;
-  ItemDetail: { itemId: string };
+  SwipeItemDetail: { itemId: string };
 };
 
 const Stack = createNativeStackNavigator<SwipeStackParamList>();
@@ -27,7 +27,7 @@ export function SwipeStack() {
         options={{ title: 'Swipe', headerShown: true }}
       />
       <Stack.Screen
-        name="ItemDetail"
+        name="SwipeItemDetail"
         component={ItemDetailScreen}
         options={{ title: 'Item', headerShown: true }}
       />

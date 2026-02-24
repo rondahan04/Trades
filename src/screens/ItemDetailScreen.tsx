@@ -24,7 +24,7 @@ export function ItemDetailScreen({
   navigation,
 }: {
   route: { params: { itemId: string } };
-  navigation: { goBack: () => void };
+  navigation: { goBack: () => void; getParent: () => { navigate: (tab: string, opts?: any) => void } | undefined };
 }) {
   const { itemId } = route.params;
   const item = getItemById(itemId);
@@ -35,6 +35,12 @@ export function ItemDetailScreen({
   const rating = getRating(itemId);
   const userStars = user ? getUserRating(itemId, user.id) : null;
   const owner = item ? getUserById(item.ownerId) : null;
+
+  const handleMessage = useCallback(() => {
+    if (!owner || !user) return;
+    const tabNav = navigation.getParent();
+    tabNav?.navigate('Chat', { screen: 'Chat', params: { otherUserId: owner.id, otherUserName: owner.displayName, itemId } });
+  }, [owner, user, navigation]);
 
   const handleRate = useCallback(
     (stars: number) => {
@@ -94,6 +100,12 @@ export function ItemDetailScreen({
               </View>
             )}
             <Text style={styles.ownerText}>Listed by {owner.displayName}</Text>
+            {user && user.id !== owner.id && (
+              <TouchableOpacity style={styles.messageButton} onPress={handleMessage}>
+                <Ionicons name="chatbubble-outline" size={20} color={colors.textOnSwipe} />
+                <Text style={styles.messageButtonText}>Message</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -234,6 +246,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    flexWrap: 'wrap',
+    gap: 10,
   },
   avatar: {
     width: 32,
@@ -249,6 +263,21 @@ const styles = StyleSheet.create({
   ownerText: {
     fontSize: 15,
     color: colors.textSecondary,
+    flex: 1,
+  },
+  messageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  messageButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textOnPrimary,
   },
   section: {
     marginBottom: 24,

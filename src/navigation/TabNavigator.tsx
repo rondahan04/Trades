@@ -4,11 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { SwipeStack } from './SwipeStack';
 import { MyItemsStack } from './MyItemsStack';
+import { ChatStack } from './ChatStack';
 import { ProfileStack } from './ProfileStack';
 
 export type TabParamList = {
   Swipe: undefined;
   'My Items': undefined;
+  Chat: undefined;
   Profile: undefined;
 };
 
@@ -49,6 +51,17 @@ export function TabNavigator() {
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Chat"
+        component={ChatStack}
+        options={{
+          title: 'Chat',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles-outline" size={size} color={color} />
           ),
         }}
       />

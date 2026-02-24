@@ -66,7 +66,7 @@ export function ProfileScreen() {
               <TouchableOpacity
                 key={item.id}
                 style={styles.itemRow}
-                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                onPress={() => navigation.navigate('ProfileItemDetail', { itemId: item.id })}
               >
                 <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
                 <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
@@ -90,7 +90,7 @@ export function ProfileScreen() {
               <TouchableOpacity
                 key={item.id}
                 style={styles.itemRow}
-                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                onPress={() => navigation.navigate('ProfileItemDetail', { itemId: item.id })}
               >
                 <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
                 <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />

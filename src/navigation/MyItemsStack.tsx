@@ -6,7 +6,7 @@ import { colors } from '../theme';
 
 export type MyItemsStackParamList = {
   MyItemsList: undefined;
-  ItemDetail: { itemId: string };
+  MyItemsItemDetail: { itemId: string };
 };
 
 const Stack = createNativeStackNavigator<MyItemsStackParamList>();
@@ -27,7 +27,7 @@ export function MyItemsStack() {
         options={{ title: 'My Items', headerShown: true }}
       />
       <Stack.Screen
-        name="ItemDetail"
+        name="MyItemsItemDetail"
         component={ItemDetailScreen}
         options={{ title: 'Item', headerShown: true }}
       />

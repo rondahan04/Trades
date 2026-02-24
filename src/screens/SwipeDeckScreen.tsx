@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SwipeableItemCard, SwipeDirection } from '../components/SwipeableItemCard';
+import { MatchOverlay } from '../components/MatchOverlay';
 import { MOCK_ITEMS } from '../utils/mockData';
 import { useAppData } from '../contexts';
 import type { Item } from '../utils/mockData';
@@ -33,19 +34,34 @@ export function SwipeDeckScreen() {
   const [tierFilter, setTierFilter] = useState<ValueTier | 'all'>('all');
   const [categoryFilter, setCategoryFilter] = useState<ItemCategory | 'all'>('all');
   const [deck, setDeck] = useState<Item[]>(() => getFilteredItems('all', 'all'));
+  const [showMatchOverlay, setShowMatchOverlay] = useState(false);
+  const [pendingMatchItemId, setPendingMatchItemId] = useState<string | null>(null);
 
   const refreshDeck = useCallback(() => {
     const list = getFilteredItems(tierFilter, categoryFilter);
     setDeck(list);
   }, [tierFilter, categoryFilter]);
 
+  const onMatchOverlayDismiss = useCallback(() => {
+    if (pendingMatchItemId) {
+      addMatch(pendingMatchItemId);
+      setPendingMatchItemId(null);
+    }
+    setDeck((prev) => prev.slice(1));
+    setShowMatchOverlay(false);
+  }, [pendingMatchItemId, addMatch]);
+
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection) => {
       const top = deck[0];
-      if (top && direction === 'right') addMatch(top.id);
-      setDeck((prev) => prev.slice(1));
+      if (direction === 'right' && top) {
+        setPendingMatchItemId(top.id);
+        setShowMatchOverlay(true);
+      } else {
+        setDeck((prev) => prev.slice(1));
+      }
     },
-    [deck, addMatch]
+    [deck]
   );
 
   const onTierChange = useCallback((tier: ValueTier | 'all') => {
@@ -115,7 +131,7 @@ export function SwipeDeckScreen() {
               <SwipeableItemCard
                 item={item}
                 onSwipeComplete={onSwipeComplete}
-                onPressDetail={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                onPressDetail={() => navigation.navigate('SwipeItemDetail', { itemId: item.id })}
               />
             </View>
           );
@@ -131,6 +147,11 @@ export function SwipeDeckScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      <MatchOverlay
+        visible={showMatchOverlay}
+        onDismiss={onMatchOverlayDismiss}
+      />
     </View>
   );
 }
