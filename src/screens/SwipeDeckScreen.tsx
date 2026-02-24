@@ -1,15 +1,17 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SwipeableItemCard, SwipeDirection } from '../components/SwipeableItemCard';
 import { MatchOverlay } from '../components/MatchOverlay';
 import { MOCK_ITEMS } from '../utils/mockData';
-import { useAppData } from '../contexts';
+import { useAppData, useAuth } from '../contexts';
 import type { Item } from '../utils/mockData';
 import type { SwipeStackParamList } from '../navigation/SwipeStack';
 import { colors } from '../theme';
 import type { ValueTier, ItemCategory } from '../utils/mockData';
+import { fetchSwipeDeck, recordSwipe } from '../services/dbService';
+import { isFirebaseEnabled } from '../config/firebase';
 
 const TIERS: ValueTier[] = ['$', '$$', '$$$'];
 const CATEGORIES: ItemCategory[] = [
@@ -30,17 +32,40 @@ function getFilteredItems(
 
 export function SwipeDeckScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<SwipeStackParamList, 'SwipeDeck'>>();
+  const { user } = useAuth();
   const { addMatch } = useAppData();
-  const [tierFilter, setTierFilter] = useState<ValueTier | 'all'>('all');
+  const [tierFilter, setTierFilter] = useState<ValueTier | 'all'>('$$');
   const [categoryFilter, setCategoryFilter] = useState<ItemCategory | 'all'>('all');
-  const [deck, setDeck] = useState<Item[]>(() => getFilteredItems('all', 'all'));
+  const [deck, setDeck] = useState<Item[]>(() => getFilteredItems('$$', 'all'));
+  const [deckLoading, setDeckLoading] = useState(false);
   const [showMatchOverlay, setShowMatchOverlay] = useState(false);
   const [pendingMatchItemId, setPendingMatchItemId] = useState<string | null>(null);
 
+  const loadDeck = useCallback(async (tier: ValueTier | 'all') => {
+    if (isFirebaseEnabled() && user && tier !== 'all') {
+      setDeckLoading(true);
+      try {
+        const items = await fetchSwipeDeck(tier, user.id);
+        setDeck(items);
+      } catch (e) {
+        if (__DEV__) console.warn('fetchSwipeDeck failed, using mock', e);
+        setDeck(getFilteredItems(tier, categoryFilter));
+      } finally {
+        setDeckLoading(false);
+      }
+    } else {
+      setDeck(getFilteredItems(tier, categoryFilter));
+      setDeckLoading(false);
+    }
+  }, [user, categoryFilter]);
+
+  useEffect(() => {
+    loadDeck(tierFilter);
+  }, [tierFilter]);
+
   const refreshDeck = useCallback(() => {
-    const list = getFilteredItems(tierFilter, categoryFilter);
-    setDeck(list);
-  }, [tierFilter, categoryFilter]);
+    loadDeck(tierFilter);
+  }, [loadDeck, tierFilter]);
 
   const onMatchOverlayDismiss = useCallback(() => {
     if (pendingMatchItemId) {
@@ -54,6 +79,9 @@ export function SwipeDeckScreen() {
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection) => {
       const top = deck[0];
+      if (top) {
+        recordSwipe(top.id, direction, null);
+      }
       if (direction === 'right' && top) {
         setPendingMatchItemId(top.id);
         setShowMatchOverlay(true);
@@ -66,15 +94,31 @@ export function SwipeDeckScreen() {
 
   const onTierChange = useCallback((tier: ValueTier | 'all') => {
     setTierFilter(tier);
-    const list = getFilteredItems(tier, categoryFilter);
-    setDeck(list);
-  }, [categoryFilter]);
+    if (isFirebaseEnabled() && user && tier !== 'all') {
+      setDeckLoading(true);
+      fetchSwipeDeck(tier, user.id)
+        .then((items) => setDeck(items))
+        .catch(() => setDeck(getFilteredItems(tier, categoryFilter)))
+        .finally(() => setDeckLoading(false));
+    } else {
+      setDeck(getFilteredItems(tier, categoryFilter));
+    }
+  }, [categoryFilter, user]);
 
   const onCategoryChange = useCallback((category: ItemCategory | 'all') => {
     setCategoryFilter(category);
     const list = getFilteredItems(tierFilter, category);
     setDeck(list);
   }, [tierFilter]);
+
+  if (deckLoading && deck.length === 0) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Loading deck...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -160,6 +204,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: colors.textSecondary,
   },
   filterRow: {
     flexDirection: 'row',

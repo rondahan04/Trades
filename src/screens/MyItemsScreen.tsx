@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts';
 import { getItemsByOwnerId } from '../utils/mockData';
 import { colors } from '../theme';
@@ -31,14 +32,26 @@ export function MyItemsScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.title}>My Items</Text>
-        <Text style={styles.subtitle}>You haven’t listed any items yet.</Text>
+        <Text style={styles.subtitle}>You haven't listed any items yet.</Text>
+        <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('NewItem')}>
+          <Ionicons name="add" size={24} color={colors.textOnPrimary} />
+          <Text style={styles.addButtonText}>Add item</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.sectionTitle}>{myItems.length} listed</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.sectionTitle}>{myItems.length} listed</Text>
+        <TouchableOpacity
+          style={styles.headerAddBtn}
+          onPress={() => navigation.navigate('NewItem')}
+        >
+          <Ionicons name="add-circle" size={28} color={colors.primary} />
+        </TouchableOpacity>
+      </View>
       {myItems.map((item) => (
         <TouchableOpacity
           key={item.id}
@@ -91,6 +104,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
     marginBottom: 12,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  headerAddBtn: {
+    padding: 4,
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 16,
+    marginTop: 20,
+    gap: 8,
+  },
+  addButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textOnPrimary,
   },
   card: {
     flexDirection: 'row',
