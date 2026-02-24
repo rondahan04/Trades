@@ -43,7 +43,7 @@ export function MyItemsScreen() {
         <TouchableOpacity
           key={item.id}
           style={styles.card}
-          onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+          onPress={() => navigation.navigate('MyItemsItemDetail', { itemId: item.id })}
           activeOpacity={0.8}
         >
           <Image

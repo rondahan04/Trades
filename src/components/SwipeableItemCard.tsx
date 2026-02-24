@@ -95,7 +95,7 @@ export function SwipeableItemCard({ item, onSwipeComplete, onPressDetail }: Swip
     return { opacity };
   });
 
-  const photoUri = item.photos[0] ?? '';
+  const photoUri = item.photos[0]?.trim() || 'https://images.unsplash.com/photo-1588979353373-340e129bb785?w=600';
 
   return (
     <GestureDetector gesture={panGesture}>
@@ -111,12 +111,8 @@ export function SwipeableItemCard({ item, onSwipeComplete, onPressDetail }: Swip
               <Ionicons name="information-circle" size={28} color="#fff" />
             </Pressable>
           )}
-          <Animated.View style={[styles.overlay, styles.overlayRight, overlayRightStyle]}>
-            <Text style={styles.overlayText}>TRADE</Text>
-          </Animated.View>
-          <Animated.View style={[styles.overlay, styles.overlayLeft, overlayLeftStyle]}>
-            <Text style={styles.overlayText}>PASS</Text>
-          </Animated.View>
+          <Animated.View style={[styles.overlay, styles.overlayRight, overlayRightStyle]} />
+          <Animated.View style={[styles.overlay, styles.overlayLeft, overlayLeftStyle]} />
         </View>
         <View style={styles.footer}>
           <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
@@ -145,6 +141,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: CARD_HEIGHT,
     position: 'relative',
+    backgroundColor: colors.borderLight,
   },
   detailButton: {
     position: 'absolute',
@@ -170,12 +167,6 @@ const styles = StyleSheet.create({
   },
   overlayLeft: {
     backgroundColor: colors.swipeLeftOverlay,
-  },
-  overlayText: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.textOnSwipe,
-    letterSpacing: 2,
   },
   footer: {
     paddingHorizontal: 16,

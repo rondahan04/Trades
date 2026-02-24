@@ -1,11 +1,25 @@
 import 'react-native-gesture-handler';
+import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './src/contexts';
-import { AppDataProvider } from './src/contexts';
+import { AuthProvider, AppDataProvider, useAuth, useAppData } from './src/contexts';
+import { ChatProvider } from './src/contexts';
 import { RootNavigator } from './src/navigation';
+
+function AppContent() {
+  const { user } = useAuth();
+  const { matchIds } = useAppData();
+  return (
+    <ChatProvider currentUserId={user?.id ?? null} matchIds={matchIds}>
+      <NavigationContainer>
+        <RootNavigator />
+        <StatusBar style="dark" />
+      </NavigationContainer>
+    </ChatProvider>
+  );
+}
 
 export default function App() {
   return (
@@ -13,10 +27,7 @@ export default function App() {
       <SafeAreaProvider>
         <AuthProvider>
           <AppDataProvider>
-            <NavigationContainer>
-              <RootNavigator />
-              <StatusBar style="dark" />
-            </NavigationContainer>
+            <AppContent />
           </AppDataProvider>
         </AuthProvider>
       </SafeAreaProvider>

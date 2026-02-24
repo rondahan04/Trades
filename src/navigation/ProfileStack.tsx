@@ -6,7 +6,7 @@ import { colors } from '../theme';
 
 export type ProfileStackParamList = {
   ProfileMain: undefined;
-  ItemDetail: { itemId: string };
+  ProfileItemDetail: { itemId: string };
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -27,7 +27,7 @@ export function ProfileStack() {
         options={{ title: 'Profile', headerShown: true }}
       />
       <Stack.Screen
-        name="ItemDetail"
+        name="ProfileItemDetail"
         component={ItemDetailScreen}
         options={{ title: 'Item', headerShown: true }}
       />
