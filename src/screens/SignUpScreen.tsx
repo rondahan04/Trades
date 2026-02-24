@@ -1,3 +1,8 @@
+/**
+ * Sign Up screen – Nano Banana theme.
+ * Email/password auth via Firebase (or mock when Firebase not configured).
+ */
+
 import React, { useState } from 'react';
 import {
   View,
@@ -13,22 +18,32 @@ import {
 import { colors } from '../theme';
 import { useAuth } from '../contexts';
 
-export function LoginScreen({ navigation }: { navigation: { navigate: (s: string) => void } }) {
+export function SignUpScreen({ navigation }: { navigation: { navigate: (s: string) => void } }) {
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { register } = useAuth();
 
-  const handleLogin = async () => {
+  const handleSignUp = async () => {
     if (!email.trim() || !password) {
       Alert.alert('Missing fields', 'Please enter email and password.');
       return;
     }
+    if (password.length < 6) {
+      Alert.alert('Password too short', 'Use at least 6 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      Alert.alert("Passwords don't match", 'Check Confirm password.');
+      return;
+    }
     setLoading(true);
-    const result = await login(email.trim(), password);
+    const result = await register(email.trim(), password, displayName.trim() || 'Trader');
     setLoading(false);
     if (result.ok) return;
-    Alert.alert('Login failed', result.error);
+    Alert.alert('Sign up failed', result.error);
   };
 
   return (
@@ -37,9 +52,17 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.card}>
-        <Text style={styles.title}>Welcome back</Text>
-        <Text style={styles.subtitle}>Sign in to continue trading</Text>
+        <Text style={styles.title}>Create account</Text>
+        <Text style={styles.subtitle}>Join Trades and start swapping</Text>
 
+        <TextInput
+          style={styles.input}
+          placeholder="Display name"
+          placeholderTextColor={colors.textSecondary}
+          value={displayName}
+          onChangeText={setDisplayName}
+          autoCapitalize="words"
+        />
         <TextInput
           style={styles.input}
           placeholder="Email"
@@ -52,31 +75,40 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
         />
         <TextInput
           style={styles.input}
-          placeholder="Password"
+          placeholder="Password (min 6 characters)"
           placeholderTextColor={colors.textSecondary}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          autoComplete="password"
+          autoComplete="password-new"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Confirm password"
+          placeholderTextColor={colors.textSecondary}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+          autoComplete="password-new"
         />
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
+          onPress={handleSignUp}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color={colors.textOnPrimary} />
           ) : (
-            <Text style={styles.buttonText}>Sign in</Text>
+            <Text style={styles.buttonText}>Sign up</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.link}
-          onPress={() => navigation.navigate('SignUp')}
+          onPress={() => navigation.navigate('Login')}
         >
-          <Text style={styles.linkText}>Don’t have an account? Sign up</Text>
+          <Text style={styles.linkText}>Already have an account? Sign in</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>

@@ -2,11 +2,13 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MyItemsScreen } from '../screens/MyItemsScreen';
 import { ItemDetailScreen } from '../screens/ItemDetailScreen';
+import { NewItemScreen } from '../screens/NewItemScreen';
 import { colors } from '../theme';
 
 export type MyItemsStackParamList = {
   MyItemsList: undefined;
   MyItemsItemDetail: { itemId: string };
+  NewItem: undefined;
 };
 
 const Stack = createNativeStackNavigator<MyItemsStackParamList>();
@@ -30,6 +32,11 @@ export function MyItemsStack() {
         name="MyItemsItemDetail"
         component={ItemDetailScreen}
         options={{ title: 'Item', headerShown: true }}
+      />
+      <Stack.Screen
+        name="NewItem"
+        component={NewItemScreen}
+        options={{ title: 'New Item', headerShown: true }}
       />
     </Stack.Navigator>
   );
