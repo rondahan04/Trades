@@ -4,22 +4,28 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAZFLoBusjZax6xgAp06Zb6vHR3e21ryCc",
-  authDomain: "trades-4903d.firebaseapp.com",
-  projectId: "trades-4903d",
-  storageBucket: "trades-4903d.firebasestorage.app",
-  messagingSenderId: "135349224503",
-  appId: "1:135349224503:web:a2405293916428c7d96bb2",
-  measurementId: "G-SXYSM1NQ70"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Initialize Firebase
-const app: FirebaseApp = initializeApp(firebaseConfig);
+// Initialize Firebase only when required env vars are set
+const app: FirebaseApp | null =
+  firebaseConfig.apiKey &&
+  firebaseConfig.authDomain &&
+  firebaseConfig.projectId &&
+  firebaseConfig.storageBucket &&
+  firebaseConfig.appId
+    ? initializeApp(firebaseConfig)
+    : null;
 
 // Auth (persistence warning in RN is non-fatal; auth still works in-session)
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
+export const storage = app ? getStorage(app) : null;
 
 /** Whether Firebase is configured and in use (for feature flags / mock fallback). */
 export function isFirebaseEnabled(): boolean {

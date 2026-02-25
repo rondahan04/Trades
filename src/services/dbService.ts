@@ -1,8 +1,10 @@
 /**
  * Firestore + Storage data layer for Trades.
  * All Firebase calls are centralized here.
+ * Image uploads use expo-file-system + uploadString (base64) to avoid React Native Blob issues.
  */
 
+import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import {
   collection,
   doc,
@@ -18,7 +20,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
@@ -66,21 +68,32 @@ export interface UpdateUserProfileInput {
 /** Swipe direction for recordSwipe */
 export type SwipeDirection = 'left' | 'right';
 
+const UPLOAD_METADATA = { contentType: 'image/jpeg' } as const;
+
 /**
  * Upload a single image to Storage and return its download URL.
+ * Uses expo-file-system + uploadString (base64) only—no Blob/fetch (fixes RN Blob polyfill errors).
  */
-async function uploadImageToStorage(path: string, uri: string): Promise<string> {
+async function uploadImageToStorage(
+  path: string,
+  uriOrBase64: string,
+  isBase64?: boolean
+): Promise<string> {
   if (!storage) throw new Error('Firebase Storage not configured');
   const storageRef = ref(storage, path);
-  let blob: Blob;
-  if (uri.startsWith('data:')) {
-    const res = await fetch(uri);
-    blob = await res.blob();
+  let base64: string;
+  if (isBase64) {
+    base64 = uriOrBase64;
+  } else if (uriOrBase64.startsWith('data:')) {
+    const base64Part = uriOrBase64.split(',')[1];
+    if (!base64Part) throw new Error('Invalid data URL');
+    base64 = base64Part;
   } else {
-    const res = await fetch(uri, { method: 'GET' });
-    blob = await res.blob();
+    base64 = await readAsStringAsync(uriOrBase64, {
+      encoding: EncodingType.Base64,
+    });
   }
-  await uploadBytes(storageRef, blob);
+  await uploadString(storageRef, base64, 'base64', UPLOAD_METADATA);
   return getDownloadURL(storageRef);
 }
 
@@ -107,12 +120,14 @@ async function uploadItemPhotos(itemId: string, photoUris: string[]): Promise<st
 // ---------------------------------------------------------------------------
 
 /**
- * Update the current user's profile. If imageUri is provided, uploads to
+ * Update the current user's profile. If imageUri or imageBase64 is provided, uploads to
  * /profile-pictures/{uid}.jpg and sets profilePictureUrl.
+ * Prefer imageBase64 on React Native to avoid Storage errors with file:// URIs.
  */
 export async function updateUserProfile(
   data: UpdateUserProfileInput,
-  imageUri?: string | null
+  imageUri?: string | null,
+  imageBase64?: string | null
 ): Promise<void> {
   if (!isFirebaseEnabled() || !db || !storage || !auth?.currentUser) {
     throw new Error('Firebase not configured or user not signed in.');
@@ -121,7 +136,13 @@ export async function updateUserProfile(
   const userRef = doc(db, USERS_COLLECTION, uid);
 
   let profilePictureUrl: string | null = null;
-  if (imageUri) {
+  if (imageBase64) {
+    profilePictureUrl = await uploadImageToStorage(
+      `${PROFILE_PICTURES_PREFIX}/${uid}.jpg`,
+      imageBase64,
+      true
+    );
+  } else if (imageUri) {
     profilePictureUrl = await uploadImageToStorage(
       `${PROFILE_PICTURES_PREFIX}/${uid}.jpg`,
       imageUri
