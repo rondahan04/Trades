@@ -55,6 +55,16 @@ export function ProfileScreen() {
         )}
         <Text style={styles.displayName}>{user.displayName}</Text>
         <Text style={styles.email}>{user.email}</Text>
+        {(user as { bio?: string }).bio ? (
+          <Text style={styles.bio}>{(user as { bio?: string }).bio}</Text>
+        ) : null}
+        <TouchableOpacity
+          style={styles.editProfileBtn}
+          onPress={() => navigation.navigate('EditProfile')}
+        >
+          <Ionicons name="pencil" size={18} color={colors.primaryDark} />
+          <Text style={styles.editProfileText}>Edit profile</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
@@ -151,6 +161,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  bio: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  editProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 6,
+  },
+  editProfileText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primaryDark,
   },
   section: {
     marginBottom: 24,

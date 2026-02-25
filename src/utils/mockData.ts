@@ -21,6 +21,8 @@ export interface User {
   displayName: string;
   email: string;
   avatarUrl?: string;
+  bio?: string;
+  location?: string;
   /** Plain text for mock auth only */
   password?: string;
 }

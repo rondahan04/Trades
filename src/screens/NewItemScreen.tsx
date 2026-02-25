@@ -1,6 +1,6 @@
 /**
- * New Item screen – create a listing.
- * Form: title, description, valueTier, placeholder for photos. Submit calls createItem (Firebase).
+ * New Item screen – create a listing with camera/gallery photos.
+ * Take Photo, Choose from Gallery (up to 5), thumbnails with remove. Submit calls createItem.
  */
 
 import React, { useState } from 'react';
@@ -15,7 +15,9 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
@@ -41,12 +43,62 @@ export function NewItemScreen() {
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSelectPhotos = () => {
-    Alert.alert(
-      'Select Photos',
-      'Photo picker will be wired in a later phase. You can submit without photos for now.',
-      [{ text: 'OK' }]
-    );
+  const requestCameraPermission = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    return status === 'granted';
+  };
+
+  const requestLibraryPermission = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    return status === 'granted';
+  };
+
+  const handleTakePhoto = async () => {
+    if (photoUris.length >= MAX_PHOTOS) {
+      Alert.alert('Limit reached', `You can add up to ${MAX_PHOTOS} photos.`);
+      return;
+    }
+    const ok = await requestCameraPermission();
+    if (!ok) {
+      Alert.alert('Permission needed', 'Camera access is required to take a photo.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]?.uri) {
+      setPhotoUris((prev) => [...prev.slice(0, MAX_PHOTOS - 1), result.assets[0].uri]);
+    }
+  };
+
+  const handleChooseFromGallery = async () => {
+    if (photoUris.length >= MAX_PHOTOS) {
+      Alert.alert('Limit reached', `You can add up to ${MAX_PHOTOS} photos.`);
+      return;
+    }
+    const ok = await requestLibraryPermission();
+    if (!ok) {
+      Alert.alert('Permission needed', 'Photo library access is required.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+      selectionLimit: MAX_PHOTOS - photoUris.length,
+    });
+    if (!result.canceled && result.assets?.length) {
+      const newUris = result.assets.map((a) => a.uri).filter(Boolean);
+      setPhotoUris((prev) => [...prev, ...newUris].slice(0, MAX_PHOTOS));
+    }
+  };
+
+  const removePhoto = (index: number) => {
+    setPhotoUris((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
@@ -165,13 +217,31 @@ export function NewItemScreen() {
         />
 
         <Text style={styles.label}>Photos (up to {MAX_PHOTOS})</Text>
-        <TouchableOpacity style={styles.photoButton} onPress={handleSelectPhotos}>
-          <Ionicons name="images-outline" size={28} color={colors.textSecondary} />
-          <Text style={styles.photoButtonText}>Select Photos</Text>
-          {photoUris.length > 0 && (
-            <Text style={styles.photoCount}>{photoUris.length} selected</Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.photoRow}>
+          <TouchableOpacity style={styles.photoButton} onPress={handleTakePhoto}>
+            <Ionicons name="camera" size={26} color={colors.textSecondary} />
+            <Text style={styles.photoButtonText}>Take Photo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.photoButton} onPress={handleChooseFromGallery}>
+            <Ionicons name="images-outline" size={26} color={colors.textSecondary} />
+            <Text style={styles.photoButtonText}>Gallery</Text>
+          </TouchableOpacity>
+        </View>
+        {photoUris.length > 0 && (
+          <View style={styles.thumbGrid}>
+            {photoUris.map((uri, index) => (
+              <View key={index} style={styles.thumbWrap}>
+                <Image source={{ uri }} style={styles.thumb} />
+                <TouchableOpacity
+                  style={styles.thumbRemove}
+                  onPress={() => removePhoto(index)}
+                >
+                  <Ionicons name="close" size={18} color={colors.surface} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         <TouchableOpacity
           style={[styles.submitButton, submitting && styles.submitDisabled]}
@@ -270,26 +340,52 @@ const styles = StyleSheet.create({
   catChipTextActive: {
     color: colors.text,
   },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   photoButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.surface,
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: colors.borderLight,
-    borderStyle: 'dashed',
+    gap: 8,
   },
   photoButtonText: {
-    marginLeft: 12,
-    fontSize: 16,
+    fontSize: 15,
     color: colors.textSecondary,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  photoCount: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: colors.primaryDark,
+  thumbGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
+  thumbWrap: {
+    position: 'relative',
+  },
+  thumb: {
+    width: 80,
+    height: 80,
+    borderRadius: 10,
+    backgroundColor: colors.borderLight,
+  },
+  thumbRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   submitButton: {
     backgroundColor: colors.primary,
