@@ -1,14 +1,15 @@
 /**
  * Firestore + Storage data layer for Trades.
- * All Firebase calls are centralized here. When Firebase is not configured,
- * functions return empty data or throw so callers can fall back to mock data.
+ * All Firebase calls are centralized here.
  */
 
 import {
   collection,
   doc,
   setDoc,
+  getDoc,
   getDocs,
+  updateDoc,
   query,
   where,
   orderBy,
@@ -23,7 +24,13 @@ import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
 const ITEMS_COLLECTION = 'items';
 const SWIPES_COLLECTION = 'swipes';
+const USERS_COLLECTION = 'users';
+const MATCHES_COLLECTION = 'matches';
+const REVIEWS_COLLECTION = 'reviews';
 const ITEM_PHOTOS_PREFIX = 'item-photos';
+const PROFILE_PICTURES_PREFIX = 'profile-pictures';
+
+export type ItemStatus = 'active' | 'traded';
 
 /** Shape of an item document in Firestore */
 export interface FirestoreItemDoc {
@@ -35,6 +42,7 @@ export interface FirestoreItemDoc {
   valueTier: ValueTier;
   pickupLocation: string;
   category: ItemCategory;
+  status: ItemStatus;
   createdAt?: Timestamp;
 }
 
@@ -48,55 +56,113 @@ export interface CreateItemInput {
   ownerId: string;
 }
 
+/** Input for updating user profile */
+export interface UpdateUserProfileInput {
+  displayName?: string;
+  bio?: string | null;
+  location?: string | null;
+}
+
 /** Swipe direction for recordSwipe */
 export type SwipeDirection = 'left' | 'right';
 
 /**
- * Upload image URIs to Storage at /item-photos/{itemId}/0, 1, ... and return download URLs.
- * photos: array of local file URIs (e.g. from ImagePicker) or remote URLs (we upload as-is by fetching first).
+ * Upload a single image to Storage and return its download URL.
+ */
+async function uploadImageToStorage(path: string, uri: string): Promise<string> {
+  if (!storage) throw new Error('Firebase Storage not configured');
+  const storageRef = ref(storage, path);
+  let blob: Blob;
+  if (uri.startsWith('data:')) {
+    const res = await fetch(uri);
+    blob = await res.blob();
+  } else {
+    const res = await fetch(uri, { method: 'GET' });
+    blob = await res.blob();
+  }
+  await uploadBytes(storageRef, blob);
+  return getDownloadURL(storageRef);
+}
+
+/**
+ * Upload image URIs to Storage at /item-photos/{itemId}/photo_0.jpg, photo_1.jpg, ...
  */
 async function uploadItemPhotos(itemId: string, photoUris: string[]): Promise<string[]> {
-  if (!storage) throw new Error('Firebase Storage not configured');
   const urls: string[] = [];
   for (let i = 0; i < photoUris.length; i++) {
     const uri = photoUris[i];
-    const storageRef = ref(storage, `${ITEM_PHOTOS_PREFIX}/${itemId}/${i}`);
-    let blob: Blob;
+    const path = `${ITEM_PHOTOS_PREFIX}/${itemId}/photo_${i}.jpg`;
     try {
-      if (uri.startsWith('data:')) {
-        const res = await fetch(uri);
-        blob = await res.blob();
-      } else {
-        const res = await fetch(uri, { method: 'GET' });
-        blob = await res.blob();
-      }
+      const url = await uploadImageToStorage(path, uri);
+      urls.push(url);
     } catch (e) {
-      if (__DEV__) console.warn('uploadItemPhotos: fetch blob failed for', uri, e);
-      continue;
+      if (__DEV__) console.warn('uploadItemPhotos failed for', uri, e);
     }
-    await uploadBytes(storageRef, blob);
-    const url = await getDownloadURL(storageRef);
-    urls.push(url);
   }
   return urls;
 }
 
+// ---------------------------------------------------------------------------
+// User profile
+// ---------------------------------------------------------------------------
+
 /**
- * Create a new item: upload photos to Storage, then save the item document to Firestore.
- * @param itemData - title, description, valueTier, pickupLocation, category, ownerId
- * @param photos - array of image URIs (local file:// or data URL); can be empty
- * @returns the created Item with id and photo URLs
+ * Update the current user's profile. If imageUri is provided, uploads to
+ * /profile-pictures/{uid}.jpg and sets profilePictureUrl.
+ */
+export async function updateUserProfile(
+  data: UpdateUserProfileInput,
+  imageUri?: string | null
+): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !storage || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  const uid = auth.currentUser.uid;
+  const userRef = doc(db, USERS_COLLECTION, uid);
+
+  let profilePictureUrl: string | null = null;
+  if (imageUri) {
+    profilePictureUrl = await uploadImageToStorage(
+      `${PROFILE_PICTURES_PREFIX}/${uid}.jpg`,
+      imageUri
+    );
+  }
+
+  const existing = await getDoc(userRef);
+  const existingData = existing.exists() ? existing.data() : {};
+  await setDoc(
+    userRef,
+    {
+      ...existingData,
+      userId: uid,
+      email: existingData?.email ?? auth.currentUser.email ?? '',
+      displayName: data.displayName ?? existingData?.displayName ?? null,
+      bio: data.bio !== undefined ? data.bio : existingData?.bio ?? null,
+      location: data.location !== undefined ? data.location : existingData?.location ?? null,
+      profilePictureUrl: profilePictureUrl ?? existingData?.profilePictureUrl ?? null,
+    },
+    { merge: true }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Items
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a new item: upload photos to Storage, then save the item document with status 'active'.
  */
 export async function createItem(
   itemData: CreateItemInput,
-  photos: string[] = []
+  localImageUris: string[] = []
 ): Promise<Item> {
   if (!isFirebaseEnabled() || !db || !storage) {
     throw new Error('Firebase not configured. Use mock data for testing.');
   }
   const itemRef = doc(collection(db, ITEMS_COLLECTION));
   const itemId = itemRef.id;
-  const photoUrls = photos.length > 0 ? await uploadItemPhotos(itemId, photos) : [];
+  const photoUrls =
+    localImageUris.length > 0 ? await uploadItemPhotos(itemId, localImageUris) : [];
   const docData: FirestoreItemDoc = {
     ownerId: itemData.ownerId,
     title: itemData.title.trim(),
@@ -105,6 +171,7 @@ export async function createItem(
     valueTier: itemData.valueTier,
     pickupLocation: itemData.pickupLocation.trim(),
     category: itemData.category,
+    status: 'active',
     createdAt: serverTimestamp() as Timestamp,
   };
   await setDoc(itemRef, docData);
@@ -121,11 +188,10 @@ export async function createItem(
 }
 
 /**
- * Fetch items for the swipe deck: same valueTier, exclude items owned by currentUser.
- * No geospatial filtering in this phase.
+ * Fetch items for the swipe deck: valueTier == tier, status == 'active', exclude current user's items.
  */
 export async function fetchSwipeDeck(
-  valueTier: ValueTier,
+  tier: ValueTier,
   currentUserId: string
 ): Promise<Item[]> {
   if (!isFirebaseEnabled() || !db) {
@@ -133,7 +199,8 @@ export async function fetchSwipeDeck(
   }
   const q = query(
     collection(db, ITEMS_COLLECTION),
-    where('valueTier', '==', valueTier),
+    where('valueTier', '==', tier),
+    where('status', '==', 'active'),
     where('ownerId', '!=', currentUserId),
     orderBy('ownerId'),
     orderBy('createdAt', 'desc'),
@@ -159,9 +226,6 @@ export async function fetchSwipeDeck(
 
 /**
  * Record a swipe event in the swipes collection.
- * @param targetItemId - the item that was swiped
- * @param direction - 'left' or 'right'
- * @param myActiveItemId - optional; the item the user is “offering” (for later matching logic)
  */
 export async function recordSwipe(
   targetItemId: string,
@@ -171,12 +235,74 @@ export async function recordSwipe(
   if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
     return;
   }
-  const swiperId = auth.currentUser.uid;
   await addDoc(collection(db, SWIPES_COLLECTION), {
-    swiperId,
+    swiperId: auth.currentUser.uid,
     targetItemId,
     direction,
     myActiveItemId: myActiveItemId ?? null,
     createdAt: serverTimestamp(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Matches & reviews (post-trade)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mark a match as completed and set involved items' status to 'traded'.
+ * Expects match doc to have: status, itemIds (array) or similar; adjust to your match schema.
+ */
+export async function markTradeCompleted(matchId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  const matchRef = doc(db, MATCHES_COLLECTION, matchId);
+  const matchSnap = await getDoc(matchRef);
+  if (!matchSnap.exists()) {
+    throw new Error('Match not found.');
+  }
+  const match = matchSnap.data();
+  await updateDoc(matchRef, { status: 'completed' });
+  const itemIds: string[] = match?.itemIds ?? [];
+  for (const itemId of itemIds) {
+    const itemRef = doc(db, ITEMS_COLLECTION, itemId);
+    await updateDoc(itemRef, { status: 'traded' });
+  }
+}
+
+/**
+ * Submit a review. CRITICAL: Only allowed if match exists, user is a participant, and match.status === 'completed'.
+ */
+export async function submitReview(
+  matchId: string,
+  revieweeId: string,
+  rating: number,
+  reviewText: string
+): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  const uid = auth.currentUser.uid;
+  const matchRef = doc(db, MATCHES_COLLECTION, matchId);
+  const matchSnap = await getDoc(matchRef);
+  if (!matchSnap.exists()) {
+    throw new Error('Match not found. You can only review completed trades.');
+  }
+  const match = matchSnap.data();
+  const status = match?.status;
+  if (status !== 'completed') {
+    throw new Error('You can only leave a review after the trade is completed.');
+  }
+  const participants: string[] = match?.participantIds ?? [match?.user1Id, match?.user2Id].filter(Boolean);
+  if (!participants.includes(uid) || !participants.includes(revieweeId)) {
+    throw new Error('You can only review the other party in this trade.');
+  }
+  await addDoc(collection(db, REVIEWS_COLLECTION), {
+    matchId,
+    reviewerId: uid,
+    revieweeId,
+    rating,
+    text: reviewText.trim(),
+    timestamp: serverTimestamp(),
   });
 }

@@ -20,6 +20,7 @@ export interface FirestoreUserDoc {
   userId: string;
   email: string;
   displayName: string | null;
+  bio?: string | null;
   location: string | null;
   profilePictureUrl: string | null;
 }
@@ -30,6 +31,8 @@ function firestoreUserToAppUser(docData: FirestoreUserDoc): User {
     displayName: docData.displayName ?? 'Trader',
     email: docData.email,
     avatarUrl: docData.profilePictureUrl ?? undefined,
+    bio: docData.bio ?? undefined,
+    location: docData.location ?? undefined,
   };
 }
 
@@ -39,6 +42,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   register: (email: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
+  /** Re-fetch current user from Firestore (e.g. after editing profile). */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -183,12 +188,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    if (!isFirebaseEnabled() || !auth?.currentUser || !db) return;
+    const fbUser = auth.currentUser;
+    try {
+      const userRef = doc(db, USERS_COLLECTION, fbUser.uid);
+      const snap = await getDoc(userRef);
+      if (snap.exists()) {
+        const data = snap.data() as FirestoreUserDoc;
+        setUser(firestoreUserToAppUser({ ...data, userId: fbUser.uid }));
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('refreshUser failed', e);
+    }
+  }, []);
+
   const value: AuthContextValue = {
     user,
     isLoading,
     login,
     register,
     logout,
+    refreshUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

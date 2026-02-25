@@ -1,51 +1,27 @@
-/**
- * Firebase initialization for Trades.
- * Uses standard env vars so you can keep secrets out of the repo.
- * If any required env is missing, auth/db/storage are still exported but may be null
- * and the app can fall back to mock data.
- */
-
-import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getStorage, type FirebaseStorage } from 'firebase/storage';
+import { initializeApp, type FirebaseApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? undefined,
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ?? undefined,
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? undefined,
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET ?? undefined,
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? undefined,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID ?? undefined,
+  apiKey: "AIzaSyAZFLoBusjZax6xgAp06Zb6vHR3e21ryCc",
+  authDomain: "trades-4903d.firebaseapp.com",
+  projectId: "trades-4903d",
+  storageBucket: "trades-4903d.firebasestorage.app",
+  messagingSenderId: "135349224503",
+  appId: "1:135349224503:web:a2405293916428c7d96bb2",
+  measurementId: "G-SXYSM1NQ70"
 };
 
-function isFirebaseConfigured(): boolean {
-  return !!(
-    firebaseConfig.apiKey &&
-    firebaseConfig.authDomain &&
-    firebaseConfig.projectId &&
-    firebaseConfig.storageBucket &&
-    firebaseConfig.appId
-  );
-}
+// Initialize Firebase
+const app: FirebaseApp = initializeApp(firebaseConfig);
 
-let app: FirebaseApp | null = null;
-if (isFirebaseConfigured()) {
-  try {
-    app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-  } catch (e) {
-    if (__DEV__) {
-      console.warn('Firebase init failed:', e);
-    }
-  }
-}
+// Auth (persistence warning in RN is non-fatal; auth still works in-session)
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-export const auth: Auth | null = app ? getAuth(app) : null;
-export const db: Firestore | null = app ? getFirestore(app) : null;
-export const storage: FirebaseStorage | null = app ? getStorage(app) : null;
-export const firebaseApp: FirebaseApp | null = app;
-
-/** Use this to gate Firebase-only features or fall back to mock data */
+/** Whether Firebase is configured and in use (for feature flags / mock fallback). */
 export function isFirebaseEnabled(): boolean {
   return app != null && auth != null && db != null && storage != null;
 }
