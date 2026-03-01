@@ -46,7 +46,7 @@ export function SwipeDeckScreen() {
       setDeckLoading(true);
       try {
         const items = await fetchSwipeDeck(tier, user.id);
-        setDeck(items);
+        setDeck(items.length > 0 ? items : getFilteredItems(tier, categoryFilter));
       } catch (e) {
         if (__DEV__) console.warn('fetchSwipeDeck failed, using mock', e);
         setDeck(getFilteredItems(tier, categoryFilter));
@@ -97,7 +97,7 @@ export function SwipeDeckScreen() {
     if (isFirebaseEnabled() && user && tier !== 'all') {
       setDeckLoading(true);
       fetchSwipeDeck(tier, user.id)
-        .then((items) => setDeck(items))
+        .then((items) => setDeck(items.length > 0 ? items : getFilteredItems(tier, categoryFilter)))
         .catch(() => setDeck(getFilteredItems(tier, categoryFilter)))
         .finally(() => setDeckLoading(false));
     } else {

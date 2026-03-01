@@ -12,8 +12,8 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Initialize Firebase only when required env vars are set
-const app: FirebaseApp | null =
+// Initialize Firebase only when required env vars are set (export for Functions usage)
+export const app: FirebaseApp | null =
   firebaseConfig.apiKey &&
   firebaseConfig.authDomain &&
   firebaseConfig.projectId &&
@@ -26,6 +26,9 @@ const app: FirebaseApp | null =
 export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
 export const storage = app ? getStorage(app) : null;
+
+/** Storage bucket name (for REST uploads that avoid Blob in RN). */
+export const storageBucket = firebaseConfig.storageBucket || null;
 
 /** Whether Firebase is configured and in use (for feature flags / mock fallback). */
 export function isFirebaseEnabled(): boolean {
