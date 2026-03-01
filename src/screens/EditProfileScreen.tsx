@@ -51,7 +51,7 @@ export function EditProfileScreen() {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
@@ -71,7 +71,7 @@ export function EditProfileScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
@@ -103,7 +103,7 @@ export function EditProfileScreen() {
     }
     setSaving(true);
     try {
-      await updateUserProfile(
+      const result = await updateUserProfile(
         {
           displayName: displayName.trim() || user.displayName,
           bio: bio.trim() || null,
@@ -113,9 +113,17 @@ export function EditProfileScreen() {
         profileImageBase64
       );
       await refreshUser();
-      Alert.alert('Saved', 'Your profile has been updated.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      if (result?.pictureUploadFailed) {
+        Alert.alert(
+          'Saved',
+          'Profile updated, but the photo could not be uploaded. Check your network or try again.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      } else {
+        Alert.alert('Saved', 'Your profile has been updated.', [
+          { text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to save profile';
       Alert.alert('Error', message);

@@ -4,7 +4,7 @@
  * Image uploads use expo-file-system + uploadString (base64) to avoid React Native Blob issues.
  */
 
-import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
+import { readAsStringAsync, EncodingType, uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import {
   collection,
   doc,
@@ -20,7 +20,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
@@ -69,6 +69,27 @@ export interface UpdateUserProfileInput {
 export type SwipeDirection = 'left' | 'right';
 
 const UPLOAD_METADATA = { contentType: 'image/jpeg' } as const;
+const PROFILE_PHOTO_UPLOAD_TIMEOUT_MS = 25_000;
+
+/** Run a promise with a timeout; on timeout throw so caller can treat as upload failed. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+}
+
+/** Get raw base64 string from URI or data URL. */
+async function uriOrBase64ToBase64(uriOrDataUrl: string): Promise<string> {
+  if (uriOrDataUrl.startsWith('data:')) {
+    const part = uriOrDataUrl.split(',')[1];
+    if (!part) throw new Error('Invalid data URL');
+    return part;
+  }
+  return readAsStringAsync(uriOrDataUrl, { encoding: EncodingType.Base64 });
+}
 
 /**
  * Upload a single image to Storage and return its download URL.
@@ -93,7 +114,9 @@ async function uploadImageToStorage(
       encoding: EncodingType.Base64,
     });
   }
-  await uploadString(storageRef, base64, 'base64', UPLOAD_METADATA);
+  // Use data_url format so Firebase SDK doesn't decode base64 to ArrayBuffer (avoids RN Blob error)
+  const dataUrl = `data:image/jpeg;base64,${base64}`;
+  await uploadString(storageRef, dataUrl, 'data_url', UPLOAD_METADATA);
   return getDownloadURL(storageRef);
 }
 
@@ -119,38 +142,65 @@ async function uploadItemPhotos(itemId: string, photoUris: string[]): Promise<st
 // User profile
 // ---------------------------------------------------------------------------
 
+/** Result of updateUserProfile when photo upload is skipped (e.g. timeout or network). */
+export interface UpdateUserProfileResult {
+  pictureUploadFailed?: boolean;
+}
+
 /**
- * Update the current user's profile. If imageUri or imageBase64 is provided, uploads to
- * /profile-pictures/{uid}.jpg and sets profilePictureUrl.
- * Prefer imageBase64 on React Native to avoid Storage errors with file:// URIs.
+ * Update the current user's profile. If imageUri or imageBase64 is provided, uploads via
+ * Storage REST API (no Cloud Function, works on free Spark plan). On failure we still save
+ * profile and set result.pictureUploadFailed.
  */
 export async function updateUserProfile(
   data: UpdateUserProfileInput,
   imageUri?: string | null,
   imageBase64?: string | null
-): Promise<void> {
-  if (!isFirebaseEnabled() || !db || !storage || !auth?.currentUser) {
+): Promise<UpdateUserProfileResult> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
     throw new Error('Firebase not configured or user not signed in.');
   }
   const uid = auth.currentUser.uid;
   const userRef = doc(db, USERS_COLLECTION, uid);
-
-  let profilePictureUrl: string | null = null;
-  if (imageBase64) {
-    profilePictureUrl = await uploadImageToStorage(
-      `${PROFILE_PICTURES_PREFIX}/${uid}.jpg`,
-      imageBase64,
-      true
-    );
-  } else if (imageUri) {
-    profilePictureUrl = await uploadImageToStorage(
-      `${PROFILE_PICTURES_PREFIX}/${uid}.jpg`,
-      imageUri
-    );
-  }
-
   const existing = await getDoc(userRef);
   const existingData = existing.exists() ? existing.data() : {};
+
+  let profilePictureUrl: string | null = existingData?.profilePictureUrl ?? null;
+  let pictureUploadFailed = false;
+
+  if (imageUri) {
+    try {
+      const uid = auth.currentUser.uid;
+      
+      // 1. Force the classic appspot bucket name for the REST API
+      const bucket = 'trades-4903d.appspot.com'; 
+      const path = `profile-pictures/${uid}.jpg`;
+      const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?name=${encodeURIComponent(path)}`;
+
+      // 2. Bypass React Native's broken Blob system and upload natively!
+      const uploadResult = await uploadAsync(uploadUrl, imageUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystemUploadType.BINARY_CONTENT,
+        headers: {
+          'Content-Type': 'image/jpeg',
+        },
+      });
+
+      // 3. The REST API returns JSON containing the secure download token (required for private files)
+      const responseData = JSON.parse(uploadResult.body);
+      const token = responseData.downloadTokens != null
+        ? (Array.isArray(responseData.downloadTokens) ? responseData.downloadTokens[0] : responseData.downloadTokens)
+        : responseData.metadata?.firebaseStorageDownloadTokens;
+
+      profilePictureUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+      if (token) profilePictureUrl += `&token=${token}`;
+
+    } catch (e) {
+      console.error("Native Upload Failed:", e);
+      pictureUploadFailed = true;
+    }
+  }
+
   await setDoc(
     userRef,
     {
@@ -160,10 +210,12 @@ export async function updateUserProfile(
       displayName: data.displayName ?? existingData?.displayName ?? null,
       bio: data.bio !== undefined ? data.bio : existingData?.bio ?? null,
       location: data.location !== undefined ? data.location : existingData?.location ?? null,
-      profilePictureUrl: profilePictureUrl ?? existingData?.profilePictureUrl ?? null,
+      profilePictureUrl,
     },
     { merge: true }
   );
+
+  return pictureUploadFailed ? { pictureUploadFailed: true } : {};
 }
 
 // ---------------------------------------------------------------------------

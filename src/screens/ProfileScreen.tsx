@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,11 @@ import {
   Image,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { doc, getDoc } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useAuth } from '../contexts';
@@ -17,13 +19,90 @@ import { useAppData } from '../contexts';
 import { getItemById } from '../utils/mockData';
 import { getItemsByOwnerId } from '../utils/mockData';
 import type { ProfileStackParamList } from '../navigation/ProfileStack';
+import { db, isFirebaseEnabled } from '../config/firebase';
+
+const USERS_COLLECTION = 'users';
+
+/** Fetched profile data from Firestore (users collection) */
+interface ProfileUserData {
+  displayName: string | null;
+  email: string;
+  bio: string | null;
+  location: string | null;
+  profilePictureUrl: string | null;
+}
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
   const { matchIds } = useAppData();
   const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParamList, 'ProfileMain'>>();
+  const [userData, setUserData] = useState<ProfileUserData | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
-  const myItems = user ? getItemsByOwnerId(user.id) : [];
+  // Safely grab the correct ID
+  const currentUserId = (user as any)?.uid || (user as any)?.id;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user || !currentUserId || !isFirebaseEnabled() || !db) {
+        setUserData(user ? { 
+          displayName: user.displayName ?? null, 
+          email: user.email, 
+          bio: (user as any).bio ?? null, 
+          location: (user as any).location ?? null, 
+          profilePictureUrl: (user as any).avatarUrl ?? null 
+        } : null);
+        setProfileLoading(false);
+        return;
+      }
+      
+      let cancelled = false;
+      setProfileLoading(true);
+      const userRef = doc(db, USERS_COLLECTION, currentUserId);
+      
+      getDoc(userRef)
+        .then((snap) => {
+          if (cancelled) return;
+          if (snap.exists()) {
+            const data = snap.data();
+            setUserData({
+              displayName: data.displayName ?? null,
+              email: data.email ?? user.email,
+              bio: data.bio ?? null,
+              location: data.location ?? null,
+              profilePictureUrl: data.profilePictureUrl ?? null,
+            });
+          } else {
+            setUserData({
+              displayName: user.displayName ?? null,
+              email: user.email,
+              bio: null,
+              location: null,
+              profilePictureUrl: (user as any).avatarUrl ?? null,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("Error fetching user profile:", err);
+          if (!cancelled) {
+            setUserData({
+              displayName: user.displayName ?? null,
+              email: user.email,
+              bio: (user as any).bio ?? null,
+              location: (user as any).location ?? null,
+              profilePictureUrl: (user as any).avatarUrl ?? null,
+            });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setProfileLoading(false);
+        });
+        
+      return () => { cancelled = true; };
+    }, [user, currentUserId])
+  );
+
+  const myItems = currentUserId ? getItemsByOwnerId(currentUserId) : [];
   const matchItems = matchIds
     .map((id) => getItemById(id))
     .filter((i): i is NonNullable<typeof i> => i != null);
@@ -43,21 +122,45 @@ export function ProfileScreen() {
     );
   }
 
+  // The master data object the UI will strictly read from
+  const displayData = userData ?? {
+    displayName: user.displayName ?? null,
+    email: user.email,
+    bio: (user as any).bio ?? null,
+    location: (user as any).location ?? null,
+    profilePictureUrl: (user as any).avatarUrl ?? null,
+  };
+
+  const [imageError, setImageError] = useState(false);
+  useEffect(() => { setImageError(false); }, [displayData.profilePictureUrl]);
+  const avatarUri = displayData.profilePictureUrl && !imageError ? displayData.profilePictureUrl : null;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        {user.avatarUrl ? (
-          <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Ionicons name="person" size={40} color={colors.textSecondary} />
+        {profileLoading ? (
+          <View style={[styles.avatarCircle, styles.avatarPlaceholder]}>
+            <ActivityIndicator size="small" color={colors.primary} />
           </View>
+        ) : avatarUri ? (
+          <Image
+            key={avatarUri}
+            source={{ uri: avatarUri }}
+            style={styles.avatarCircle}
+            onError={() => setImageError(true)}
+            onLoadStart={() => setImageError(false)}
+          />
+        ) : (
+          <View style={[styles.avatarCircle, styles.avatarPlaceholder]} />
         )}
-        <Text style={styles.displayName}>{user.displayName}</Text>
-        <Text style={styles.email}>{user.email}</Text>
-        {(user as { bio?: string }).bio ? (
-          <Text style={styles.bio}>{(user as { bio?: string }).bio}</Text>
+        
+        <Text style={styles.displayName}>{displayData.displayName || 'Test'}</Text>
+        <Text style={styles.email}>{displayData.email}</Text>
+        
+        {displayData.bio ? (
+          <Text style={styles.bio}>{displayData.bio}</Text>
         ) : null}
+        
         <TouchableOpacity
           style={styles.editProfileBtn}
           onPress={() => navigation.navigate('EditProfile')}
@@ -141,11 +244,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 28,
   },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginBottom: 12,
+  avatarCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 15,
+    alignSelf: 'center',
   },
   avatarPlaceholder: {
     backgroundColor: colors.borderLight,
