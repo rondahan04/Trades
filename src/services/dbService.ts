@@ -20,8 +20,9 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
+import { getIdToken } from 'firebase/auth';
 import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth, isFirebaseEnabled } from '../config/firebase';
+import { db, storage, auth, storageBucket, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
 const ITEMS_COLLECTION = 'items';
@@ -171,20 +172,29 @@ export async function updateUserProfile(
   if (imageUri) {
     try {
       const uid = auth.currentUser.uid;
-      
-      // 1. Force the classic appspot bucket name for the REST API
-      const bucket = 'trades-4903d.appspot.com'; 
+
+      // 1. Use the bucket from env var (firebasestorage.app format)
+      const bucket = storageBucket;
+      if (!bucket) throw new Error('Firebase Storage bucket not configured');
       const path = `profile-pictures/${uid}.jpg`;
       const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?name=${encodeURIComponent(path)}`;
 
-      // 2. Bypass React Native's broken Blob system and upload natively!
+      // 2. Get auth token for Firebase Storage rules
+      const idToken = await getIdToken(auth.currentUser);
+
+      // 3. Bypass React Native's broken Blob system and upload natively!
       const uploadResult = await uploadAsync(uploadUrl, imageUri, {
         httpMethod: 'POST',
         uploadType: FileSystemUploadType.BINARY_CONTENT,
         headers: {
           'Content-Type': 'image/jpeg',
+          'Authorization': `Bearer ${idToken}`,
         },
       });
+
+      if (uploadResult.status < 200 || uploadResult.status >= 300) {
+        throw new Error(`Upload failed (HTTP ${uploadResult.status}): ${uploadResult.body}`);
+      }
 
       // 3. The REST API returns JSON containing the secure download token (required for private files)
       const responseData = JSON.parse(uploadResult.body);
