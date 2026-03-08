@@ -1,11 +1,20 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getItemById, getUserById, getItemsByOwnerId } from '../utils/mockData';
 import type { User } from '../utils/mockData';
+import { isFirebaseEnabled } from '../config/firebase';
+import {
+  getConversationId,
+  sendChatMessage,
+  listenToConversationMessages,
+  listenToUserConversations,
+  fetchUserProfile,
+  type ConversationDoc,
+} from '../services/dbService';
 
 const CHAT_KEY = '@trades_chats';
 
-/** Seed conversation for a@gmail.com (user-mock) with Omer (user-b) so we can see chat UI */
+/** Seed conversation for mock mode (a@gmail.com / user-mock ↔ user-b) */
 const MOCK_CHAT_SEED_KEY = 'user-b_user-mock';
 const MOCK_CHAT_SEED: ChatMessage[] = [
   { id: 'seed-1', senderId: 'user-b', text: 'Hi! Interested in the jacket?', timestamp: Date.now() - 86400000 * 2 },
@@ -27,10 +36,6 @@ export interface Conversation {
   itemId: string;
 }
 
-function getConversationId(userId1: string, userId2: string): string {
-  return [userId1, userId2].sort().join('_');
-}
-
 interface ChatContextValue {
   conversations: Conversation[];
   getMessages: (otherUserId: string) => ChatMessage[];
@@ -47,8 +52,66 @@ interface ChatProviderProps {
 
 export function ChatProvider({ children, currentUserId, matchIds }: ChatProviderProps) {
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
+  const [conversationDocs, setConversationDocs] = useState<ConversationDoc[]>([]);
+  const [otherUsers, setOtherUsers] = useState<Record<string, User>>({});
 
+  const messageListenersRef = useRef<Record<string, () => void>>({});
+  const fetchedUserIdsRef = useRef(new Set<string>());
+
+  const firebaseMode = isFirebaseEnabled() && !!currentUserId;
+
+  // Firebase: listen to the user's conversation list
   useEffect(() => {
+    if (!firebaseMode || !currentUserId) return;
+    const unsub = listenToUserConversations(currentUserId, setConversationDocs);
+    return unsub;
+  }, [firebaseMode, currentUserId]);
+
+  // Firebase: set up per-conversation message listeners as conversations are discovered
+  useEffect(() => {
+    if (!firebaseMode) return;
+    for (const conv of conversationDocs) {
+      if (!messageListenersRef.current[conv.id]) {
+        const unsub = listenToConversationMessages(conv.id, (msgs) => {
+          setMessagesByConv((prev) => ({ ...prev, [conv.id]: msgs }));
+        });
+        messageListenersRef.current[conv.id] = unsub;
+      }
+    }
+  }, [firebaseMode, conversationDocs]);
+
+  // Firebase: fetch Firestore profiles for users we haven't seen yet
+  useEffect(() => {
+    if (!firebaseMode || !currentUserId || conversationDocs.length === 0) return;
+    const toFetch = [
+      ...new Set(
+        conversationDocs
+          .flatMap((d) => d.participantIds.filter((id) => id !== currentUserId))
+          .filter((id) => !fetchedUserIdsRef.current.has(id))
+      ),
+    ];
+    if (toFetch.length === 0) return;
+    toFetch.forEach((id) => fetchedUserIdsRef.current.add(id));
+    Promise.all(toFetch.map(fetchUserProfile)).then((profiles) => {
+      const updated: Record<string, User> = {};
+      toFetch.forEach((id, i) => { if (profiles[i]) updated[id] = profiles[i]!; });
+      if (Object.keys(updated).length > 0) {
+        setOtherUsers((prev) => ({ ...prev, ...updated }));
+      }
+    });
+  }, [firebaseMode, conversationDocs, currentUserId]);
+
+  // Cleanup all message listeners on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(messageListenersRef.current).forEach((fn) => fn());
+      messageListenersRef.current = {};
+    };
+  }, []);
+
+  // Mock mode: load messages from AsyncStorage
+  useEffect(() => {
+    if (firebaseMode) return;
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(CHAT_KEY);
@@ -62,11 +125,7 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
         // ignore
       }
     })();
-  }, []);
-
-  const persist = useCallback((data: Record<string, ChatMessage[]>) => {
-    AsyncStorage.setItem(CHAT_KEY, JSON.stringify(data));
-  }, []);
+  }, [firebaseMode]);
 
   const getMessages = useCallback(
     (otherUserId: string): ChatMessage[] => {
@@ -81,24 +140,51 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
     (otherUserId: string, text: string) => {
       if (!currentUserId || !text.trim()) return;
       const cid = getConversationId(currentUserId, otherUserId);
-      const msg: ChatMessage = {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        senderId: currentUserId,
-        text: text.trim(),
-        timestamp: Date.now(),
-      };
-      setMessagesByConv((prev) => {
-        const list = [...(prev[cid] ?? []), msg];
-        const next = { ...prev, [cid]: list };
-        persist(next);
-        return next;
-      });
+
+      if (firebaseMode) {
+        const convDoc = conversationDocs.find((d) => d.id === cid);
+        const itemId = convDoc?.itemId ?? '';
+        sendChatMessage(cid, [currentUserId, otherUserId].sort(), itemId, currentUserId, text.trim()).catch((e) => {
+          if (__DEV__) console.warn('sendChatMessage failed:', e);
+        });
+      } else {
+        const msg: ChatMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          senderId: currentUserId,
+          text: text.trim(),
+          timestamp: Date.now(),
+        };
+        setMessagesByConv((prev) => {
+          const list = [...(prev[cid] ?? []), msg];
+          const next = { ...prev, [cid]: list };
+          AsyncStorage.setItem(CHAT_KEY, JSON.stringify(next));
+          return next;
+        });
+      }
     },
-    [currentUserId, persist]
+    [currentUserId, firebaseMode, conversationDocs]
   );
 
-  const conversations: Conversation[] = React.useMemo(() => {
+  const conversations = useMemo((): Conversation[] => {
     if (!currentUserId) return [];
+
+    if (firebaseMode) {
+      return conversationDocs
+        .map((d) => {
+          const otherId = d.participantIds.find((id) => id !== currentUserId) ?? '';
+          const otherUser: User = otherUsers[otherId] ?? getUserById(otherId) ?? {
+            id: otherId,
+            displayName: 'Trader',
+            email: '',
+          };
+          const msgs = messagesByConv[d.id] ?? [];
+          const lastMessage = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+          return { otherUser, lastMessage, itemId: d.itemId };
+        })
+        .sort((a, b) => (b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0));
+    }
+
+    // Mock mode: build from matchIds + existing message history
     const seen = new Set<string>();
     const list: Conversation[] = [];
 
@@ -131,13 +217,9 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
 
     list.sort((a, b) => (b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0));
     return list;
-  }, [currentUserId, matchIds, messagesByConv]);
+  }, [currentUserId, firebaseMode, conversationDocs, messagesByConv, otherUsers, matchIds]);
 
-  const value: ChatContextValue = {
-    conversations,
-    getMessages,
-    sendMessage,
-  };
+  const value: ChatContextValue = { conversations, getMessages, sendMessage };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }
