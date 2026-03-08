@@ -4,7 +4,8 @@
  * Image uploads use expo-file-system + uploadString (base64) to avoid React Native Blob issues.
  */
 
-import { readAsStringAsync, EncodingType, uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
+import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
   collection,
   doc,
@@ -20,9 +21,8 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { getIdToken } from 'firebase/auth';
-import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth, storageBucket, isFirebaseEnabled } from '../config/firebase';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { db, storage, auth, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
 const ITEMS_COLLECTION = 'items';
@@ -70,17 +70,6 @@ export interface UpdateUserProfileInput {
 export type SwipeDirection = 'left' | 'right';
 
 const UPLOAD_METADATA = { contentType: 'image/jpeg' } as const;
-const PROFILE_PHOTO_UPLOAD_TIMEOUT_MS = 25_000;
-
-/** Run a promise with a timeout; on timeout throw so caller can treat as upload failed. */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
-}
 
 /** Get raw base64 string from URI or data URL. */
 async function uriOrBase64ToBase64(uriOrDataUrl: string): Promise<string> {
@@ -171,42 +160,16 @@ export async function updateUserProfile(
 
   if (imageUri) {
     try {
-      const uid = auth.currentUser.uid;
-
-      // 1. Use the bucket from env var (firebasestorage.app format)
-      const bucket = storageBucket;
-      if (!bucket) throw new Error('Firebase Storage bucket not configured');
-      const path = `profile-pictures/${uid}.jpg`;
-      const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?name=${encodeURIComponent(path)}`;
-
-      // 2. Get auth token for Firebase Storage rules
-      const idToken = await getIdToken(auth.currentUser);
-
-      // 3. Bypass React Native's broken Blob system and upload natively!
-      const uploadResult = await uploadAsync(uploadUrl, imageUri, {
-        httpMethod: 'POST',
-        uploadType: FileSystemUploadType.BINARY_CONTENT,
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'Authorization': `Bearer ${idToken}`,
-        },
-      });
-
-      if (uploadResult.status < 200 || uploadResult.status >= 300) {
-        throw new Error(`Upload failed (HTTP ${uploadResult.status}): ${uploadResult.body}`);
-      }
-
-      // 3. The REST API returns JSON containing the secure download token (required for private files)
-      const responseData = JSON.parse(uploadResult.body);
-      const token = responseData.downloadTokens != null
-        ? (Array.isArray(responseData.downloadTokens) ? responseData.downloadTokens[0] : responseData.downloadTokens)
-        : responseData.metadata?.firebaseStorageDownloadTokens;
-
-      profilePictureUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
-      if (token) profilePictureUrl += `&token=${token}`;
-
+      // Resize to 200×200 and compress — keeps the Firestore doc well under 1MB
+      const resized = await manipulateAsync(
+        imageUri,
+        [{ resize: { width: 200, height: 200 } }],
+        { compress: 0.6, format: SaveFormat.JPEG }
+      );
+      const base64 = await readAsStringAsync(resized.uri, { encoding: EncodingType.Base64 });
+      profilePictureUrl = `data:image/jpeg;base64,${base64}`;
     } catch (e) {
-      console.error("Native Upload Failed:", e);
+      if (__DEV__) console.error('Profile picture resize failed:', e);
       pictureUploadFailed = true;
     }
   }
