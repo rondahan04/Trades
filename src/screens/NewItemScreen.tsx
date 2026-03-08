@@ -23,12 +23,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useAuth } from '../contexts';
 import { createItem } from '../services/dbService';
+import { suggestItemMetadata } from '../services/aiService';
 import { isFirebaseEnabled } from '../config/firebase';
 import type { ValueTier, ItemCategory } from '../utils/mockData';
 
 const VALUE_TIERS: ValueTier[] = ['$', '$$', '$$$'];
 const CATEGORIES: ItemCategory[] = [
-  'Electronics', 'Clothing', 'Home', 'Sports', 'Books', 'Toys', 'Music', 'Art', 'Other',
+  'Electronics', 'Clothing', 'Home', 'Sports', 'Books', 'SneakerHead', 'Art', 'Other',
 ];
 const MAX_PHOTOS = 5;
 
@@ -42,6 +43,7 @@ export function NewItemScreen() {
   const [pickupLocation, setPickupLocation] = useState('');
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [autoFilling, setAutoFilling] = useState(false);
 
   const requestCameraPermission = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -101,6 +103,23 @@ export function NewItemScreen() {
     setPhotoUris((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleAutoFill = async () => {
+    if (photoUris.length === 0) return;
+    setAutoFilling(true);
+    try {
+      const suggestion = await suggestItemMetadata(photoUris[0]);
+      if (suggestion.title) setTitle(suggestion.title);
+      if (suggestion.description) setDescription(suggestion.description);
+      setCategory(suggestion.category);
+      setValueTier(suggestion.valueTier);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Auto-fill failed';
+      Alert.alert('Auto-fill failed', message);
+    } finally {
+      setAutoFilling(false);
+    }
+  };
+
   const handleSubmit = async () => {
     const t = title.trim();
     const d = description.trim();
@@ -154,6 +173,23 @@ export function NewItemScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        {photoUris.length > 0 && (
+          <TouchableOpacity
+            style={[styles.autoFillButton, autoFilling && styles.submitDisabled]}
+            onPress={handleAutoFill}
+            disabled={autoFilling}
+          >
+            {autoFilling ? (
+              <ActivityIndicator color={colors.textOnPrimary} size="small" />
+            ) : (
+              <>
+                <Ionicons name="sparkles" size={18} color={colors.textOnPrimary} />
+                <Text style={styles.autoFillButtonText}>Auto-Fill with AI</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
         <Text style={styles.label}>Title</Text>
         <TextInput
           style={styles.input}
@@ -399,6 +435,21 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     fontSize: 17,
+    fontWeight: '700',
+    color: colors.textOnPrimary,
+  },
+  autoFillButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryDark,
+    borderRadius: 14,
+    paddingVertical: 12,
+    marginTop: 12,
+    gap: 8,
+  },
+  autoFillButtonText: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.textOnPrimary,
   },

@@ -15,7 +15,7 @@ import { isFirebaseEnabled } from '../config/firebase';
 
 const TIERS: ValueTier[] = ['$', '$$', '$$$'];
 const CATEGORIES: ItemCategory[] = [
-  'Electronics', 'Clothing', 'Home', 'Sports', 'Books', 'Toys', 'Music', 'Art', 'Other',
+  'Electronics', 'Clothing', 'Home', 'Sports', 'Books', 'SneakerHead', 'Art', 'Other',
 ];
 
 function getFilteredItems(
