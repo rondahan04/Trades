@@ -11,8 +11,7 @@ export type ItemCategory =
   | 'Home'
   | 'Sports'
   | 'Books'
-  | 'Toys'
-  | 'Music'
+  | 'SneakerHead'
   | 'Art'
   | 'Other';
 
@@ -56,9 +55,9 @@ const picsum = (seed: string, w = 600, h = 400) =>
 
 /** All mock items (25+) for deck and browsing */
 export const MOCK_ITEMS: Item[] = [
-  { id: 'item-1', ownerId: 'user-a', title: 'Vintage Record Player', description: 'Working turntable with wooden case. Great condition, comes with cables.', photos: [picsum('item-1')], valueTier: '$$', pickupLocation: 'Ra\'anana', category: 'Music' },
+  { id: 'item-1', ownerId: 'user-a', title: 'Vintage Record Player', description: 'Working turntable with wooden case. Great condition, comes with cables.', photos: [picsum('item-1')], valueTier: '$$', pickupLocation: 'Ra\'anana', category: 'Electronics' },
   { id: 'item-2', ownerId: 'user-b', title: 'Designer Leather Jacket', description: 'Barely worn, size M. Perfect for fall and winter.', photos: [picsum('item-2')], valueTier: '$$$', pickupLocation: 'Tel Aviv', category: 'Clothing' },
-  { id: 'item-3', ownerId: 'user-c', title: 'Board Game Collection', description: 'Catan, Ticket to Ride, Codenames. All complete with boxes.', photos: [picsum('item-3')], valueTier: '$', pickupLocation: 'Herzliya', category: 'Toys' },
+  { id: 'item-3', ownerId: 'user-c', title: 'Board Game Collection', description: 'Catan, Ticket to Ride, Codenames. All complete with boxes.', photos: [picsum('item-3')], valueTier: '$', pickupLocation: 'Herzliya', category: 'Other' },
   { id: 'item-4', ownerId: 'user-d', title: 'Mechanical Keyboard', description: 'Cherry MX Brown, RGB. Used for 6 months.', photos: [picsum('item-4')], valueTier: '$$', pickupLocation: 'Ra\'anana', category: 'Electronics' },
   { id: 'item-5', ownerId: 'user-e', title: 'Pottery Set (4 Mugs)', description: 'Handmade ceramic mugs, dishwasher safe.', photos: [picsum('item-5')], valueTier: '$', pickupLocation: 'Netanya', category: 'Home' },
   { id: 'item-6', ownerId: 'user-f', title: 'Wireless Earbuds', description: 'Brand new, sealed. Great sound and battery life.', photos: [picsum('item-6')], valueTier: '$$', pickupLocation: 'Tel Aviv', category: 'Electronics' },
@@ -70,19 +69,19 @@ export const MOCK_ITEMS: Item[] = [
   { id: 'item-12', ownerId: 'user-d', title: 'Bluetooth Speaker', description: 'JBL Flip 5. Waterproof, great bass.', photos: [picsum('item-12')], valueTier: '$$', pickupLocation: 'Ra\'anana', category: 'Electronics' },
   { id: 'item-13', ownerId: 'user-e', title: 'Cookbook Set (3)', description: 'Italian, Baking, and Quick Meals. Hardcovers.', photos: [picsum('item-13')], valueTier: '$', pickupLocation: 'Hod HaSharon', category: 'Books' },
   { id: 'item-14', ownerId: 'user-f', title: 'Throw Pillows (4)', description: 'Velvet, neutral colors. 18x18 in.', photos: [picsum('item-14')], valueTier: '$', pickupLocation: 'Rishon LeZion', category: 'Home' },
-  { id: 'item-15', ownerId: 'user-g', title: 'Acoustic Guitar', description: 'Beginner-friendly. Includes soft case and picks.', photos: [picsum('item-15')], valueTier: '$$$', pickupLocation: 'Ra\'anana', category: 'Music' },
+  { id: 'item-15', ownerId: 'user-g', title: 'Acoustic Guitar', description: 'Beginner-friendly. Includes soft case and picks.', photos: [picsum('item-15')], valueTier: '$$$', pickupLocation: 'Ra\'anana', category: 'Other' },
   { id: 'item-16', ownerId: 'user-h', title: 'Skateboard Complete', description: '8" deck, good bearings. Some wear.', photos: [picsum('item-16')], valueTier: '$$', pickupLocation: 'Herzliya', category: 'Sports' },
   { id: 'item-17', ownerId: 'user-a', title: 'Desk Organizer Set', description: 'Bamboo, multiple compartments. Minimal style.', photos: [picsum('item-17')], valueTier: '$', pickupLocation: 'Ra\'anana', category: 'Home' },
   { id: 'item-18', ownerId: 'user-b', title: 'Sunglasses Polarized', description: 'Classic aviator style. UV400 protection.', photos: [picsum('item-18')], valueTier: '$$', pickupLocation: 'Petah Tikva', category: 'Clothing' },
-  { id: 'item-19', ownerId: 'user-c', title: 'Puzzle 1000 pcs', description: 'Landscape scene, sealed. Family-friendly.', photos: [picsum('item-19')], valueTier: '$', pickupLocation: 'Netanya', category: 'Toys' },
+  { id: 'item-19', ownerId: 'user-c', title: 'Puzzle 1000 pcs', description: 'Landscape scene, sealed. Family-friendly.', photos: [picsum('item-19')], valueTier: '$', pickupLocation: 'Netanya', category: 'Other' },
   { id: 'item-20', ownerId: 'user-d', title: 'Tablet Stand', description: 'Adjustable angle, fits 10" tablets. Aluminum.', photos: [picsum('item-20')], valueTier: '$', pickupLocation: 'Ra\'anana', category: 'Electronics' },
   { id: 'item-21', ownerId: 'user-e', title: 'Watercolor Set', description: '24 colors, brushes included. Barely used.', photos: [picsum('item-21')], valueTier: '$$', pickupLocation: 'Haifa', category: 'Art' },
   { id: 'item-22', ownerId: 'user-f', title: 'Novel Collection (5)', description: 'Fiction bestsellers. Good condition.', photos: [picsum('item-22')], valueTier: '$', pickupLocation: 'Ramat Gan', category: 'Books' },
   { id: 'item-23', ownerId: 'user-g', title: 'Camping Chair', description: 'Folding, lightweight. Cup holder and pocket.', photos: [picsum('item-23')], valueTier: '$$', pickupLocation: 'Kfar Saba', category: 'Sports' },
-  { id: 'item-24', ownerId: 'user-h', title: 'Vinyl Records (6)', description: 'Classic rock. Played a few times.', photos: [picsum('item-24')], valueTier: '$$', pickupLocation: 'Herzliya', category: 'Music' },
+  { id: 'item-24', ownerId: 'user-h', title: 'Vinyl Records (6)', description: 'Classic rock. Played a few times.', photos: [picsum('item-24')], valueTier: '$$', pickupLocation: 'Herzliya', category: 'Other' },
   { id: 'item-25', ownerId: 'user-a', title: 'Plant Pot Set (3)', description: 'Terracotta, drainage holes. 6" each.', photos: [picsum('item-25')], valueTier: '$', pickupLocation: 'Hod HaSharon', category: 'Home' },
   { id: 'item-26', ownerId: 'user-b', title: 'Winter Scarf', description: 'Wool blend, neutral gray. One season.', photos: [picsum('item-26')], valueTier: '$', pickupLocation: 'Ra\'anana', category: 'Clothing' },
-  { id: 'item-27', ownerId: 'user-c', title: 'Card Game Bundle', description: 'Uno, Phase 10, Skip-Bo. All complete.', photos: [picsum('item-27')], valueTier: '$', pickupLocation: 'Rishon LeZion', category: 'Toys' },
+  { id: 'item-27', ownerId: 'user-c', title: 'Card Game Bundle', description: 'Uno, Phase 10, Skip-Bo. All complete.', photos: [picsum('item-27')], valueTier: '$', pickupLocation: 'Rishon LeZion', category: 'Other' },
   { id: 'item-28', ownerId: 'user-d', title: 'USB-C Hub', description: '7-in-1: HDMI, SD, USB 3.0. For Mac/PC.', photos: [picsum('item-28')], valueTier: '$$', pickupLocation: 'Ra\'anana', category: 'Electronics' },
   { id: 'item-29', ownerId: 'user-e', title: 'Framed Print', description: 'Abstract art print, 12x16. Frame included.', photos: [picsum('item-29')], valueTier: '$$', pickupLocation: 'Netanya', category: 'Art' },
   { id: 'item-30', ownerId: 'user-f', title: 'Resistance Bands', description: 'Set of 5, various strengths. With door anchor.', photos: [picsum('item-30')], valueTier: '$', pickupLocation: 'Petah Tikva', category: 'Sports' },
