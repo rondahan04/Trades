@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const userRef = doc(db, USERS_COLLECTION, fbUser.uid);
+        const userRef = doc(db!, USERS_COLLECTION, fbUser.uid);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
           const data = snap.data() as FirestoreUserDoc;

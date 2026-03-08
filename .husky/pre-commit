@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "Running Pre-Commit Checks..."
+
+# 1. Type Checker: Prevents committing if there are TypeScript errors
+echo "Checking TypeScript..."
+npm run type-check || { echo "TypeScript check failed! Fix errors before committing."; exit 1; }
+
+# 2. Simple Secrets Scanner: Prevents committing Firebase keys directly in code
+echo "Scanning for exposed Firebase API keys..."
+if git diff --cached -- ':(exclude).husky/' | grep -i "AIzaSy"; then
+  echo "🚨 ALERT: You are trying to commit a Firebase API key (AIza...). Move it to the .env file!"
+  exit 1
+fi
+
+echo "All checks passed! Committing..."

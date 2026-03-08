@@ -7,6 +7,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "clear-cache": "expo start -c",
+    "type-check": "tsc --noEmit",
     "deploy:functions": "firebase deploy --only functions"
   },
   "dependencies": {
