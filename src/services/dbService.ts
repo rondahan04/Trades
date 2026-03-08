@@ -18,6 +18,7 @@ import {
   orderBy,
   limit,
   addDoc,
+  onSnapshot,
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
@@ -31,7 +32,6 @@ const USERS_COLLECTION = 'users';
 const MATCHES_COLLECTION = 'matches';
 const REVIEWS_COLLECTION = 'reviews';
 const ITEM_PHOTOS_PREFIX = 'item-photos';
-const PROFILE_PICTURES_PREFIX = 'profile-pictures';
 
 export type ItemStatus = 'active' | 'traded';
 
@@ -71,16 +71,6 @@ export type SwipeDirection = 'left' | 'right';
 
 const UPLOAD_METADATA = { contentType: 'image/jpeg' } as const;
 
-/** Get raw base64 string from URI or data URL. */
-async function uriOrBase64ToBase64(uriOrDataUrl: string): Promise<string> {
-  if (uriOrDataUrl.startsWith('data:')) {
-    const part = uriOrDataUrl.split(',')[1];
-    if (!part) throw new Error('Invalid data URL');
-    return part;
-  }
-  return readAsStringAsync(uriOrDataUrl, { encoding: EncodingType.Base64 });
-}
-
 /**
  * Upload a single image to Storage and return its download URL.
  * Uses expo-file-system + uploadString (base64) only—no Blob/fetch (fixes RN Blob polyfill errors).
@@ -88,23 +78,17 @@ async function uriOrBase64ToBase64(uriOrDataUrl: string): Promise<string> {
 async function uploadImageToStorage(
   path: string,
   uriOrBase64: string,
-  isBase64?: boolean
 ): Promise<string> {
   if (!storage) throw new Error('Firebase Storage not configured');
   const storageRef = ref(storage, path);
   let base64: string;
-  if (isBase64) {
-    base64 = uriOrBase64;
-  } else if (uriOrBase64.startsWith('data:')) {
+  if (uriOrBase64.startsWith('data:')) {
     const base64Part = uriOrBase64.split(',')[1];
     if (!base64Part) throw new Error('Invalid data URL');
     base64 = base64Part;
   } else {
-    base64 = await readAsStringAsync(uriOrBase64, {
-      encoding: EncodingType.Base64,
-    });
+    base64 = await readAsStringAsync(uriOrBase64, { encoding: EncodingType.Base64 });
   }
-  // Use data_url format so Firebase SDK doesn't decode base64 to ArrayBuffer (avoids RN Blob error)
   const dataUrl = `data:image/jpeg;base64,${base64}`;
   await uploadString(storageRef, dataUrl, 'data_url', UPLOAD_METADATA);
   return getDownloadURL(storageRef);
@@ -144,8 +128,7 @@ export interface UpdateUserProfileResult {
  */
 export async function updateUserProfile(
   data: UpdateUserProfileInput,
-  imageUri?: string | null,
-  imageBase64?: string | null
+  imageUri?: string | null
 ): Promise<UpdateUserProfileResult> {
   if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
     throw new Error('Firebase not configured or user not signed in.');
@@ -351,4 +334,114 @@ export async function submitReview(
     text: reviewText.trim(),
     timestamp: serverTimestamp(),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+
+const CONVERSATIONS_COLLECTION = 'conversations';
+const MESSAGES_SUBCOLLECTION = 'messages';
+
+export interface ConversationDoc {
+  id: string;
+  participantIds: string[];
+  itemId: string;
+  lastMessage: { senderId: string; text: string; timestamp: number } | null;
+}
+
+/** Deterministic conversation ID from two user IDs. */
+export function getConversationId(uid1: string, uid2: string): string {
+  return [uid1, uid2].sort().join('_');
+}
+
+/** Send a message and create/update the conversation metadata doc. */
+export async function sendChatMessage(
+  conversationId: string,
+  participantIds: string[],
+  itemId: string,
+  senderId: string,
+  text: string
+): Promise<void> {
+  if (!isFirebaseEnabled() || !db) throw new Error('Firebase not configured');
+  const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+  await setDoc(
+    convRef,
+    {
+      participantIds,
+      itemId,
+      lastMessage: { senderId, text, timestamp: Date.now() },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  await addDoc(collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION), {
+    senderId,
+    text: text.trim(),
+    timestamp: serverTimestamp(),
+  });
+}
+
+/** Real-time listener for messages in a conversation. Returns unsubscribe fn. */
+export function listenToConversationMessages(
+  conversationId: string,
+  callback: (messages: Array<{ id: string; senderId: string; text: string; timestamp: number }>) => void
+): () => void {
+  if (!isFirebaseEnabled() || !db) return () => {};
+  const q = query(
+    collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION),
+    orderBy('timestamp', 'asc')
+  );
+  return onSnapshot(q, (snap) => {
+    callback(
+      snap.docs.map((d) => ({
+        id: d.id,
+        senderId: String(d.data().senderId),
+        text: String(d.data().text),
+        timestamp: (d.data().timestamp as Timestamp | null)?.toMillis() ?? Date.now(),
+      }))
+    );
+  });
+}
+
+/** Real-time listener for all conversations the user participates in. Returns unsubscribe fn. */
+export function listenToUserConversations(
+  userId: string,
+  callback: (conversations: ConversationDoc[]) => void
+): () => void {
+  if (!isFirebaseEnabled() || !db) return () => {};
+  const q = query(
+    collection(db, CONVERSATIONS_COLLECTION),
+    where('participantIds', 'array-contains', userId)
+  );
+  return onSnapshot(q, (snap) => {
+    callback(
+      snap.docs.map((d) => ({
+        id: d.id,
+        participantIds: (d.data().participantIds as string[]) ?? [],
+        itemId: String(d.data().itemId ?? ''),
+        lastMessage: d.data().lastMessage ?? null,
+      }))
+    );
+  });
+}
+
+/** Fetch a single user's profile from the Firestore users collection. */
+export async function fetchUserProfile(userId: string): Promise<import('../utils/mockData').User | null> {
+  if (!isFirebaseEnabled() || !db) return null;
+  try {
+    const snap = await getDoc(doc(db, USERS_COLLECTION, userId));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return {
+      id: userId,
+      displayName: String(data.displayName ?? 'Trader'),
+      email: String(data.email ?? ''),
+      avatarUrl: data.profilePictureUrl ?? undefined,
+      bio: data.bio ?? undefined,
+      location: data.location ?? undefined,
+    };
+  } catch {
+    return null;
+  }
 }

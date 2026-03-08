@@ -109,8 +109,7 @@ export function EditProfileScreen() {
           bio: bio.trim() || null,
           location: location.trim() || null,
         },
-        profileImageUri,
-        profileImageBase64
+        profileImageUri
       );
       await refreshUser();
       if (result?.pictureUploadFailed) {
