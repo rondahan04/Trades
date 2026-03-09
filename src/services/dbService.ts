@@ -4,6 +4,7 @@
  * Image uploads use expo-file-system + uploadString (base64) to avoid React Native Blob issues.
  */
 
+import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
@@ -22,8 +23,8 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth, isFirebaseEnabled } from '../config/firebase';
+import { ref, getDownloadURL } from 'firebase/storage';
+import { db, storage, auth, storageBucket, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
 const ITEMS_COLLECTION = 'items';
@@ -69,29 +70,32 @@ export interface UpdateUserProfileInput {
 /** Swipe direction for recordSwipe */
 export type SwipeDirection = 'left' | 'right';
 
-const UPLOAD_METADATA = { contentType: 'image/jpeg' } as const;
-
 /**
- * Upload a single image to Storage and return its download URL.
- * Uses expo-file-system + uploadString (base64) only—no Blob/fetch (fixes RN Blob polyfill errors).
+ * Upload a single image to Firebase Storage via the REST API using expo-file-system uploadAsync.
+ * This avoids the React Native Blob polyfill error that occurs with the Firebase Storage SDK.
  */
 async function uploadImageToStorage(
   path: string,
-  uriOrBase64: string,
+  fileUri: string,
 ): Promise<string> {
-  if (!storage) throw new Error('Firebase Storage not configured');
-  const storageRef = ref(storage, path);
-  let base64: string;
-  if (uriOrBase64.startsWith('data:')) {
-    const base64Part = uriOrBase64.split(',')[1];
-    if (!base64Part) throw new Error('Invalid data URL');
-    base64 = base64Part;
-  } else {
-    base64 = await readAsStringAsync(uriOrBase64, { encoding: EncodingType.Base64 });
+  if (!auth?.currentUser || !storageBucket) {
+    throw new Error('Firebase not configured or user not signed in');
   }
-  const dataUrl = `data:image/jpeg;base64,${base64}`;
-  await uploadString(storageRef, dataUrl, 'data_url', UPLOAD_METADATA);
-  return getDownloadURL(storageRef);
+  const token = await auth.currentUser.getIdToken();
+  const encodedPath = encodeURIComponent(path);
+  const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o?uploadType=media&name=${encodedPath}`;
+
+  await uploadAsync(uploadUrl, fileUri, {
+    httpMethod: 'POST',
+    uploadType: FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'image/jpeg',
+    },
+  });
+
+  // getDownloadURL is a simple metadata fetch — no Blob involved.
+  return getDownloadURL(ref(storage!, path));
 }
 
 /**

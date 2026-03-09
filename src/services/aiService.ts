@@ -73,10 +73,18 @@ export async function suggestItemMetadata(imageUri: string): Promise<ItemMetadat
   const textPart = parts.find((p) => !p.thought && typeof p.text === 'string');
   const text: string = textPart?.text ?? '';
 
-  // Strip potential markdown code fences and extract JSON object
+  // Extract JSON object from the response, stripping any markdown fences.
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   const cleaned = jsonMatch ? jsonMatch[0] : text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  const parsed = JSON.parse(cleaned) as Partial<ItemMetadataSuggestion>;
+  if (!cleaned) {
+    throw new Error('Gemini returned an empty response. Check your API key or try again.');
+  }
+  let parsed: Partial<ItemMetadataSuggestion>;
+  try {
+    parsed = JSON.parse(cleaned) as Partial<ItemMetadataSuggestion>;
+  } catch {
+    throw new Error('Could not parse Gemini response. Try again.');
+  }
 
   return {
     title: typeof parsed.title === 'string' ? parsed.title.slice(0, 100) : '',
