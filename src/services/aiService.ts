@@ -18,7 +18,7 @@ const VALID_CATEGORIES: ItemCategory[] = [
 ];
 const VALID_TIERS: ValueTier[] = ['$', '$$', '$$$'];
 
-const GEMINI_MODEL = 'gemini-2.5-flash-preview-05-20';
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
 const PROMPT = `You are helping categorize a second-hand item for a local trading app where people swap belongings when moving apartments.
 Look at this item image and return ONLY a JSON object (no markdown, no explanation) with these fields:
