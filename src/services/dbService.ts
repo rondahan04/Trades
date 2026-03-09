@@ -23,6 +23,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
+import { ref, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth, storageBucket, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
@@ -84,7 +85,7 @@ async function uploadImageToStorage(
   const encodedPath = encodeURIComponent(path);
   const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o?uploadType=media&name=${encodedPath}`;
 
-  const result = await uploadAsync(uploadUrl, fileUri, {
+  await uploadAsync(uploadUrl, fileUri, {
     httpMethod: 'POST',
     uploadType: FileSystemUploadType.BINARY_CONTENT,
     headers: {
@@ -93,10 +94,8 @@ async function uploadImageToStorage(
     },
   });
 
-  const responseData = JSON.parse(result.body) as { downloadTokens?: string };
-  const downloadToken = responseData.downloadTokens;
-  if (!downloadToken) throw new Error('Upload succeeded but no download token returned');
-  return `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+  // getDownloadURL is a simple metadata fetch — no Blob involved.
+  return getDownloadURL(ref(storage!, path));
 }
 
 /**
