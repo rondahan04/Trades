@@ -18,7 +18,7 @@ const VALID_CATEGORIES: ItemCategory[] = [
 ];
 const VALID_TIERS: ValueTier[] = ['$', '$$', '$$$'];
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash-preview-05-20';
 
 const PROMPT = `You are helping categorize a second-hand item for a local trading app where people swap belongings when moving apartments.
 Look at this item image and return ONLY a JSON object (no markdown, no explanation) with these fields:
@@ -37,7 +37,7 @@ export async function suggestItemMetadata(imageUri: string): Promise<ItemMetadat
     encoding: FileSystem.EncodingType.Base64,
   });
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
   const body = {
     contents: [
@@ -73,10 +73,18 @@ export async function suggestItemMetadata(imageUri: string): Promise<ItemMetadat
   const textPart = parts.find((p) => !p.thought && typeof p.text === 'string');
   const text: string = textPart?.text ?? '';
 
-  // Strip potential markdown code fences and extract JSON object
+  // Extract JSON object from the response, stripping any markdown fences.
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   const cleaned = jsonMatch ? jsonMatch[0] : text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  const parsed = JSON.parse(cleaned) as Partial<ItemMetadataSuggestion>;
+  if (!cleaned) {
+    throw new Error('Gemini returned an empty response. Check your API key or try again.');
+  }
+  let parsed: Partial<ItemMetadataSuggestion>;
+  try {
+    parsed = JSON.parse(cleaned) as Partial<ItemMetadataSuggestion>;
+  } catch {
+    throw new Error('Could not parse Gemini response. Try again.');
+  }
 
   return {
     title: typeof parsed.title === 'string' ? parsed.title.slice(0, 100) : '',
