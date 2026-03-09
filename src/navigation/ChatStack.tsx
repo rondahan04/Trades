@@ -6,7 +6,7 @@ import { colors } from '../theme';
 
 export type ChatStackParamList = {
   ConversationsList: undefined;
-  Chat: { otherUserId: string; otherUserName?: string; itemId?: string };
+  ChatRoom: { otherUserId: string; otherUserName?: string; itemId?: string };
 };
 
 const Stack = createNativeStackNavigator<ChatStackParamList>();
@@ -27,7 +27,7 @@ export function ChatStack() {
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
-        name="Chat"
+        name="ChatRoom"
         component={ChatScreen}
         options={({ route }) => ({
           title: route.params.otherUserName ?? route.params.otherUserId,

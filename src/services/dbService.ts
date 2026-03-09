@@ -258,6 +258,32 @@ export async function fetchSwipeDeck(
 }
 
 /**
+ * Fetch all active items owned by a specific user from Firestore.
+ */
+export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
+  if (!isFirebaseEnabled() || !db) return [];
+  const q = query(
+    collection(db, ITEMS_COLLECTION),
+    where('ownerId', '==', ownerId),
+    orderBy('createdAt', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => {
+    const data = d.data() as FirestoreItemDoc;
+    return {
+      id: d.id,
+      ownerId: data.ownerId,
+      title: data.title,
+      description: data.description,
+      photos: data.photos ?? [],
+      valueTier: data.valueTier,
+      pickupLocation: data.pickupLocation,
+      category: data.category,
+    };
+  });
+}
+
+/**
  * Record a swipe event in the swipes collection.
  */
 export async function recordSwipe(

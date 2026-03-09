@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,24 +6,60 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts';
 import { getItemsByOwnerId } from '../utils/mockData';
+import { fetchItemsByOwnerId } from '../services/dbService';
+import { isFirebaseEnabled } from '../config/firebase';
 import { colors } from '../theme';
 import type { MyItemsStackParamList } from '../navigation/MyItemsStack';
+import type { Item } from '../utils/mockData';
 
 export function MyItemsScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<MyItemsStackParamList, 'MyItemsList'>>();
-  const myItems = user ? getItemsByOwnerId(user.id) : [];
+  const [myItems, setMyItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadItems = useCallback(async (isRefresh = false) => {
+    if (!user) return;
+    if (isRefresh) setRefreshing(true); else setLoading(true);
+    try {
+      if (isFirebaseEnabled()) {
+        const items = await fetchItemsByOwnerId(user.id);
+        setMyItems(items);
+      } else {
+        setMyItems(getItemsByOwnerId(user.id));
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('loadItems failed:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [user]);
+
+  // Reload every time the screen comes into focus (e.g. after adding a new item).
+  useFocusEffect(useCallback(() => { loadItems(); }, [loadItems]));
 
   if (!user) {
     return (
       <View style={styles.centered}>
         <Text style={styles.subtitle}>Sign in to see your items.</Text>
+      </View>
+    );
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -42,7 +78,11 @@ export function MyItemsScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadItems(true)} />}
+    >
       <View style={styles.headerRow}>
         <Text style={styles.sectionTitle}>{myItems.length} listed</Text>
         <TouchableOpacity
