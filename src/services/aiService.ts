@@ -18,7 +18,7 @@ const VALID_CATEGORIES: ItemCategory[] = [
 ];
 const VALID_TIERS: ValueTier[] = ['$', '$$', '$$$'];
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const PROMPT = `You are helping categorize a second-hand item for a local trading app where people swap belongings when moving apartments.
 Look at this item image and return ONLY a JSON object (no markdown, no explanation) with these fields:
@@ -37,7 +37,7 @@ export async function suggestItemMetadata(imageUri: string): Promise<ItemMetadat
     encoding: FileSystem.EncodingType.Base64,
   });
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
   const body = {
     contents: [
