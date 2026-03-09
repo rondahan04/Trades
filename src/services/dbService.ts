@@ -4,7 +4,6 @@
  * Image uploads use expo-file-system + uploadString (base64) to avoid React Native Blob issues.
  */
 
-import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
@@ -23,8 +22,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth, storageBucket, isFirebaseEnabled } from '../config/firebase';
+import { db, auth, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
 const ITEMS_COLLECTION = 'items';
@@ -32,7 +30,6 @@ const SWIPES_COLLECTION = 'swipes';
 const USERS_COLLECTION = 'users';
 const MATCHES_COLLECTION = 'matches';
 const REVIEWS_COLLECTION = 'reviews';
-const ITEM_PHOTOS_PREFIX = 'item-photos';
 
 export type ItemStatus = 'active' | 'traded';
 
@@ -71,49 +68,26 @@ export interface UpdateUserProfileInput {
 export type SwipeDirection = 'left' | 'right';
 
 /**
- * Upload a single image to Firebase Storage via the REST API using expo-file-system uploadAsync.
- * This avoids the React Native Blob polyfill error that occurs with the Firebase Storage SDK.
+ * Resize, compress, and base64-encode item photos for storage in Firestore.
+ * Same approach as profile pictures — no Firebase Storage needed, no Blob issues.
+ * Each photo is resized to 600×600 at 0.6 quality (~40 KB each as base64).
  */
-async function uploadImageToStorage(
-  path: string,
-  fileUri: string,
-): Promise<string> {
-  if (!auth?.currentUser || !storageBucket) {
-    throw new Error('Firebase not configured or user not signed in');
-  }
-  const token = await auth.currentUser.getIdToken();
-  const encodedPath = encodeURIComponent(path);
-  const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o?uploadType=media&name=${encodedPath}`;
-
-  await uploadAsync(uploadUrl, fileUri, {
-    httpMethod: 'POST',
-    uploadType: FileSystemUploadType.BINARY_CONTENT,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'image/jpeg',
-    },
-  });
-
-  // getDownloadURL is a simple metadata fetch — no Blob involved.
-  return getDownloadURL(ref(storage!, path));
-}
-
-/**
- * Upload image URIs to Storage at /item-photos/{itemId}/photo_0.jpg, photo_1.jpg, ...
- */
-async function uploadItemPhotos(itemId: string, photoUris: string[]): Promise<string[]> {
-  const urls: string[] = [];
-  for (let i = 0; i < photoUris.length; i++) {
-    const uri = photoUris[i];
-    const path = `${ITEM_PHOTOS_PREFIX}/${itemId}/photo_${i}.jpg`;
+async function uploadItemPhotos(_itemId: string, photoUris: string[]): Promise<string[]> {
+  const results: string[] = [];
+  for (const uri of photoUris) {
     try {
-      const url = await uploadImageToStorage(path, uri);
-      urls.push(url);
+      const resized = await manipulateAsync(
+        uri,
+        [{ resize: { width: 600, height: 600 } }],
+        { compress: 0.6, format: SaveFormat.JPEG }
+      );
+      const base64 = await readAsStringAsync(resized.uri, { encoding: EncodingType.Base64 });
+      results.push(`data:image/jpeg;base64,${base64}`);
     } catch (e) {
       if (__DEV__) console.warn('uploadItemPhotos failed for', uri, e);
     }
   }
-  return urls;
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +163,7 @@ export async function createItem(
   itemData: CreateItemInput,
   localImageUris: string[] = []
 ): Promise<Item> {
-  if (!isFirebaseEnabled() || !db || !storage) {
+  if (!isFirebaseEnabled() || !db) {
     throw new Error('Firebase not configured. Use mock data for testing.');
   }
   const itemRef = doc(collection(db, ITEMS_COLLECTION));
