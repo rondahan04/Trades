@@ -232,6 +232,26 @@ export async function fetchSwipeDeck(
 }
 
 /**
+ * Fetch a single item by ID from Firestore.
+ */
+export async function fetchItemById(itemId: string): Promise<Item | null> {
+  if (!isFirebaseEnabled() || !db) return null;
+  const snap = await getDoc(doc(db, ITEMS_COLLECTION, itemId));
+  if (!snap.exists()) return null;
+  const data = snap.data() as FirestoreItemDoc;
+  return {
+    id: snap.id,
+    ownerId: data.ownerId,
+    title: data.title,
+    description: data.description,
+    photos: data.photos ?? [],
+    valueTier: data.valueTier,
+    pickupLocation: data.pickupLocation,
+    category: data.category,
+  };
+}
+
+/**
  * Fetch all active items owned by a specific user from Firestore.
  */
 export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {

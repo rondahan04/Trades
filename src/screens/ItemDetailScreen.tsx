@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,13 @@ import {
   Dimensions,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { getItemById, getUserById } from '../utils/mockData';
+import { fetchItemById } from '../services/dbService';
+import { isFirebaseEnabled } from '../config/firebase';
 import { useAppData } from '../contexts';
 import { useAuth } from '../contexts';
 import type { Item } from '../utils/mockData';
@@ -27,10 +30,20 @@ export function ItemDetailScreen({
   navigation: { goBack: () => void; getParent: () => { navigate: (tab: string, opts?: any) => void } | undefined };
 }) {
   const { itemId } = route.params;
-  const item = getItemById(itemId);
   const { user } = useAuth();
   const { getRating, setRating, getUserRating } = useAppData();
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [item, setItem] = useState<Item | null>(() => getItemById(itemId) ?? null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (item || !isFirebaseEnabled()) return;
+    setLoading(true);
+    fetchItemById(itemId)
+      .then((fetched) => setItem(fetched))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [itemId]);
 
   const rating = getRating(itemId);
   const userStars = user ? getUserRating(itemId, user.id) : null;
@@ -42,6 +55,14 @@ export function ItemDetailScreen({
     },
     [user, itemId, setRating]
   );
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   if (!item) {
     return (
