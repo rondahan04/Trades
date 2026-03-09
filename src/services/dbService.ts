@@ -278,7 +278,7 @@ export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
   });
 }
 
-/** Count how many users swiped right on a given item. */
+/** Count how many unique users swiped right on a given item. */
 export async function fetchSwipeCount(itemId: string): Promise<number> {
   if (!isFirebaseEnabled() || !db) return 0;
   const q = query(
@@ -287,7 +287,18 @@ export async function fetchSwipeCount(itemId: string): Promise<number> {
     where('direction', '==', 'right')
   );
   const snap = await getDocs(q);
-  return snap.size;
+  const uniqueSwipers = new Set(snap.docs.map((d) => String(d.data().swiperId)));
+  return uniqueSwipers.size;
+}
+
+/** Save or update the Expo push token for a user. */
+export async function savePushToken(userId: string, token: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db) return;
+  await setDoc(
+    doc(db, USERS_COLLECTION, userId),
+    { pushToken: token },
+    { merge: true }
+  );
 }
 
 /** Permanently delete an item document from Firestore. */
@@ -308,6 +319,8 @@ export async function markItemAsTraded(itemId: string): Promise<void> {
 
 /**
  * Record a swipe event in the swipes collection.
+ * Deduplicates: if the user already swiped on this item, the call is a no-op.
+ * On a right-swipe, sends a push notification to the item owner if they have a push token.
  */
 export async function recordSwipe(
   targetItemId: string,
@@ -317,13 +330,50 @@ export async function recordSwipe(
   if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
     return;
   }
+  const swiperId = auth.currentUser.uid;
+
+  // Deduplication: skip if this user already swiped on this item
+  const dedupQ = query(
+    collection(db, SWIPES_COLLECTION),
+    where('swiperId', '==', swiperId),
+    where('targetItemId', '==', targetItemId)
+  );
+  const existing = await getDocs(dedupQ);
+  if (!existing.empty) return;
+
   await addDoc(collection(db, SWIPES_COLLECTION), {
-    swiperId: auth.currentUser.uid,
+    swiperId,
     targetItemId,
     direction,
     myActiveItemId: myActiveItemId ?? null,
     createdAt: serverTimestamp(),
   });
+
+  // Send push notification to item owner on right-swipe
+  if (direction === 'right') {
+    try {
+      const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, targetItemId));
+      if (itemSnap.exists()) {
+        const ownerId = String(itemSnap.data().ownerId ?? '');
+        if (ownerId && ownerId !== swiperId) {
+          const ownerSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
+          const pushToken: string | undefined = ownerSnap.exists()
+            ? String(ownerSnap.data().pushToken ?? '')
+            : undefined;
+          if (pushToken && pushToken.startsWith('ExponentPushToken')) {
+            const { sendPushNotification } = await import('./notificationService');
+            await sendPushNotification(
+              pushToken,
+              'Someone liked your item!',
+              'A trader is interested in your listing. Check it out!'
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('[recordSwipe] push notification failed:', e);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
