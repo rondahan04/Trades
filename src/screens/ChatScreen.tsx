@@ -9,26 +9,47 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useChat } from '../contexts';
 import { useAuth } from '../contexts';
 import { getUserById, getItemById } from '../utils/mockData';
+import { fetchUserProfile } from '../services/dbService';
 import type { ChatMessage } from '../contexts/ChatContext';
+import type { User } from '../utils/mockData';
 
 export function ChatScreen({
   route,
 }: {
-  route: { params: { otherUserId: string; itemId?: string } };
+  route: { params: { otherUserId: string; otherUserName?: string; itemId?: string } };
 }) {
-  const { otherUserId, itemId } = route.params;
+  const { otherUserId, otherUserName, itemId } = route.params;
   const { getMessages, sendMessage } = useChat();
   const { user } = useAuth();
   const [input, setInput] = useState('');
   const flatListRef = useRef<FlatList>(null);
+  const [otherUser, setOtherUser] = useState<User | null>(
+    () => getUserById(otherUserId) ?? null
+  );
+  const [userLoading, setUserLoading] = useState(!otherUser);
 
-  const otherUser = getUserById(otherUserId);
+  // Fetch from Firestore if not in mock data
+  useEffect(() => {
+    if (otherUser) return;
+    setUserLoading(true);
+    fetchUserProfile(otherUserId)
+      .then((profile) => {
+        if (profile) setOtherUser(profile);
+        else setOtherUser({ id: otherUserId, displayName: otherUserName ?? 'Trader', email: '' });
+      })
+      .catch(() => {
+        setOtherUser({ id: otherUserId, displayName: otherUserName ?? 'Trader', email: '' });
+      })
+      .finally(() => setUserLoading(false));
+  }, [otherUserId]);
+
   const messages = getMessages(otherUserId);
   const chatItem = itemId ? getItemById(itemId) : undefined;
 
@@ -45,10 +66,10 @@ export function ChatScreen({
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  if (!otherUser) {
+  if (userLoading) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.errorText}>User not found</Text>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }

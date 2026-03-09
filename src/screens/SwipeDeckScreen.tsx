@@ -43,6 +43,7 @@ export function SwipeDeckScreen() {
   const [showMatchOverlay, setShowMatchOverlay] = useState(false);
   const [pendingMatchItemId, setPendingMatchItemId] = useState<string | null>(null);
   const [matchedOtherUserId, setMatchedOtherUserId] = useState<string | null>(null);
+  const [matchedOtherUserName, setMatchedOtherUserName] = useState<string | undefined>(undefined);
   const [matchedItemId, setMatchedItemId] = useState<string | null>(null);
 
   const loadDeck = useCallback(async (tier: ValueTier | 'all') => {
@@ -77,6 +78,7 @@ export function SwipeDeckScreen() {
       setPendingMatchItemId(null);
     }
     setMatchedOtherUserId(null);
+    setMatchedOtherUserName(undefined);
     setMatchedItemId(null);
     setDeck((prev) => prev.slice(1));
     setShowMatchOverlay(false);
@@ -90,9 +92,9 @@ export function SwipeDeckScreen() {
     const tabNav = navigation.getParent<BottomTabNavigationProp<TabParamList>>();
     tabNav?.navigate('Chat', {
       screen: 'ChatRoom',
-      params: { otherUserId, itemId },
+      params: { otherUserId, otherUserName: matchedOtherUserName, itemId },
     } as never);
-  }, [matchedOtherUserId, matchedItemId, onMatchOverlayDismiss, navigation]);
+  }, [matchedOtherUserId, matchedOtherUserName, matchedItemId, onMatchOverlayDismiss, navigation]);
 
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection) => {
@@ -106,6 +108,7 @@ export function SwipeDeckScreen() {
           .then((result) => {
             if (result.matched && result.otherUserId) {
               setMatchedOtherUserId(result.otherUserId);
+              setMatchedOtherUserName(result.otherUserName);
               setMatchedItemId(result.itemId ?? null);
             }
           })

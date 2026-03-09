@@ -72,6 +72,7 @@ export type SwipeDirection = 'left' | 'right';
 export interface SwipeResult {
   matched: boolean;
   otherUserId?: string;
+  otherUserName?: string;
   /** The item the current user just liked (targetItemId) */
   itemId?: string;
 }
@@ -401,7 +402,12 @@ export async function recordSwipe(
         status: 'pending',
         createdAt: serverTimestamp(),
       });
-      return { matched: true, otherUserId: ownerId, itemId: targetItemId };
+      // Fetch the owner's display name so the chat header shows a real name
+      const ownerProfileSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
+      const otherUserName = ownerProfileSnap.exists()
+        ? String(ownerProfileSnap.data().displayName ?? 'Trader')
+        : 'Trader';
+      return { matched: true, otherUserId: ownerId, otherUserName, itemId: targetItemId };
     } else {
       // ── LIKE ONLY ─────────────────────────────────────────────────────────
       const ownerSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
