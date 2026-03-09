@@ -39,7 +39,7 @@ export function ConversationsListScreen() {
       renderItem={({ item }) => (
         <TouchableOpacity
           style={styles.row}
-          onPress={() => navigation.navigate('Chat', { otherUserId: item.otherUser.id, otherUserName: item.otherUser.displayName, itemId: item.itemId || undefined })}
+          onPress={() => navigation.navigate('ChatRoom', { otherUserId: item.otherUser.id, otherUserName: item.otherUser.displayName, itemId: item.itemId || undefined })}
           activeOpacity={0.7}
         >
           {item.otherUser.avatarUrl ? (

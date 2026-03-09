@@ -11,6 +11,8 @@ import type { SwipeStackParamList } from '../navigation/SwipeStack';
 import { colors } from '../theme';
 import type { ValueTier, ItemCategory } from '../utils/mockData';
 import { fetchSwipeDeck, recordSwipe } from '../services/dbService';
+import type { TabParamList } from '../navigation/TabNavigator';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { isFirebaseEnabled } from '../config/firebase';
 
 const TIERS: ValueTier[] = ['$', '$$', '$$$'];
@@ -40,6 +42,9 @@ export function SwipeDeckScreen() {
   const [deckLoading, setDeckLoading] = useState(false);
   const [showMatchOverlay, setShowMatchOverlay] = useState(false);
   const [pendingMatchItemId, setPendingMatchItemId] = useState<string | null>(null);
+  const [matchedOtherUserId, setMatchedOtherUserId] = useState<string | null>(null);
+  const [matchedOtherUserName, setMatchedOtherUserName] = useState<string | undefined>(undefined);
+  const [matchedItemId, setMatchedItemId] = useState<string | null>(null);
 
   const loadDeck = useCallback(async (tier: ValueTier | 'all') => {
     if (isFirebaseEnabled() && user && tier !== 'all') {
@@ -72,20 +77,44 @@ export function SwipeDeckScreen() {
       addMatch(pendingMatchItemId);
       setPendingMatchItemId(null);
     }
+    setMatchedOtherUserId(null);
+    setMatchedOtherUserName(undefined);
+    setMatchedItemId(null);
     setDeck((prev) => prev.slice(1));
     setShowMatchOverlay(false);
   }, [pendingMatchItemId, addMatch]);
 
+  const onStartChat = useCallback(() => {
+    if (!matchedOtherUserId) return;
+    const otherUserId = matchedOtherUserId;
+    const itemId = matchedItemId ?? undefined;
+    onMatchOverlayDismiss();
+    const tabNav = navigation.getParent<BottomTabNavigationProp<TabParamList>>();
+    tabNav?.navigate('Chat', {
+      screen: 'ChatRoom',
+      params: { otherUserId, otherUserName: matchedOtherUserName, itemId },
+    } as never);
+  }, [matchedOtherUserId, matchedOtherUserName, matchedItemId, onMatchOverlayDismiss, navigation]);
+
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection) => {
       const top = deck[0];
-      if (top) {
-        recordSwipe(top.id, direction, null);
-      }
       if (direction === 'right' && top) {
+        // Show overlay immediately (don't wait for Firestore)
         setPendingMatchItemId(top.id);
         setShowMatchOverlay(true);
+        // Run match check in background — updates overlay if a real match is found
+        recordSwipe(top.id, direction, null)
+          .then((result) => {
+            if (result.matched && result.otherUserId) {
+              setMatchedOtherUserId(result.otherUserId);
+              setMatchedOtherUserName(result.otherUserName);
+              setMatchedItemId(result.itemId ?? null);
+            }
+          })
+          .catch(() => {});
       } else {
+        if (top) recordSwipe(top.id, direction, null).catch(() => {});
         setDeck((prev) => prev.slice(1));
       }
     },
@@ -195,6 +224,8 @@ export function SwipeDeckScreen() {
       <MatchOverlay
         visible={showMatchOverlay}
         onDismiss={onMatchOverlayDismiss}
+        onStartChat={matchedOtherUserId ? onStartChat : undefined}
+        autoDismissMs={5000}
       />
     </View>
   );

@@ -4,7 +4,6 @@
  * Image uploads use expo-file-system + uploadString (base64) to avoid React Native Blob issues.
  */
 
-import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
@@ -14,6 +13,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -23,8 +23,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth, storageBucket, isFirebaseEnabled } from '../config/firebase';
+import { db, auth, isFirebaseEnabled } from '../config/firebase';
 import type { Item, ValueTier, ItemCategory } from '../utils/mockData';
 
 const ITEMS_COLLECTION = 'items';
@@ -32,7 +31,6 @@ const SWIPES_COLLECTION = 'swipes';
 const USERS_COLLECTION = 'users';
 const MATCHES_COLLECTION = 'matches';
 const REVIEWS_COLLECTION = 'reviews';
-const ITEM_PHOTOS_PREFIX = 'item-photos';
 
 export type ItemStatus = 'active' | 'traded';
 
@@ -70,50 +68,36 @@ export interface UpdateUserProfileInput {
 /** Swipe direction for recordSwipe */
 export type SwipeDirection = 'left' | 'right';
 
-/**
- * Upload a single image to Firebase Storage via the REST API using expo-file-system uploadAsync.
- * This avoids the React Native Blob polyfill error that occurs with the Firebase Storage SDK.
- */
-async function uploadImageToStorage(
-  path: string,
-  fileUri: string,
-): Promise<string> {
-  if (!auth?.currentUser || !storageBucket) {
-    throw new Error('Firebase not configured or user not signed in');
-  }
-  const token = await auth.currentUser.getIdToken();
-  const encodedPath = encodeURIComponent(path);
-  const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o?uploadType=media&name=${encodedPath}`;
-
-  await uploadAsync(uploadUrl, fileUri, {
-    httpMethod: 'POST',
-    uploadType: FileSystemUploadType.BINARY_CONTENT,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'image/jpeg',
-    },
-  });
-
-  // getDownloadURL is a simple metadata fetch — no Blob involved.
-  return getDownloadURL(ref(storage!, path));
+/** Result returned by recordSwipe — indicates whether a mutual match was made. */
+export interface SwipeResult {
+  matched: boolean;
+  otherUserId?: string;
+  otherUserName?: string;
+  /** The item the current user just liked (targetItemId) */
+  itemId?: string;
 }
 
 /**
- * Upload image URIs to Storage at /item-photos/{itemId}/photo_0.jpg, photo_1.jpg, ...
+ * Resize, compress, and base64-encode item photos for storage in Firestore.
+ * Same approach as profile pictures — no Firebase Storage needed, no Blob issues.
+ * Each photo is resized to 600×600 at 0.6 quality (~40 KB each as base64).
  */
-async function uploadItemPhotos(itemId: string, photoUris: string[]): Promise<string[]> {
-  const urls: string[] = [];
-  for (let i = 0; i < photoUris.length; i++) {
-    const uri = photoUris[i];
-    const path = `${ITEM_PHOTOS_PREFIX}/${itemId}/photo_${i}.jpg`;
+async function uploadItemPhotos(_itemId: string, photoUris: string[]): Promise<string[]> {
+  const results: string[] = [];
+  for (const uri of photoUris) {
     try {
-      const url = await uploadImageToStorage(path, uri);
-      urls.push(url);
+      const resized = await manipulateAsync(
+        uri,
+        [{ resize: { width: 600, height: 600 } }],
+        { compress: 0.6, format: SaveFormat.JPEG }
+      );
+      const base64 = await readAsStringAsync(resized.uri, { encoding: EncodingType.Base64 });
+      results.push(`data:image/jpeg;base64,${base64}`);
     } catch (e) {
       if (__DEV__) console.warn('uploadItemPhotos failed for', uri, e);
     }
   }
-  return urls;
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +173,7 @@ export async function createItem(
   itemData: CreateItemInput,
   localImageUris: string[] = []
 ): Promise<Item> {
-  if (!isFirebaseEnabled() || !db || !storage) {
+  if (!isFirebaseEnabled() || !db) {
     throw new Error('Firebase not configured. Use mock data for testing.');
   }
   const itemRef = doc(collection(db, ITEMS_COLLECTION));
@@ -258,23 +242,190 @@ export async function fetchSwipeDeck(
 }
 
 /**
+ * Fetch a single item by ID from Firestore.
+ */
+export async function fetchItemById(itemId: string): Promise<Item | null> {
+  if (!isFirebaseEnabled() || !db) return null;
+  const snap = await getDoc(doc(db, ITEMS_COLLECTION, itemId));
+  if (!snap.exists()) return null;
+  const data = snap.data() as FirestoreItemDoc;
+  return {
+    id: snap.id,
+    ownerId: data.ownerId,
+    title: data.title,
+    description: data.description,
+    photos: data.photos ?? [],
+    valueTier: data.valueTier,
+    pickupLocation: data.pickupLocation,
+    category: data.category,
+  };
+}
+
+/**
+ * Fetch all active items owned by a specific user from Firestore.
+ */
+export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
+  if (!isFirebaseEnabled() || !db) return [];
+  const q = query(
+    collection(db, ITEMS_COLLECTION),
+    where('ownerId', '==', ownerId),
+    orderBy('createdAt', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => {
+    const data = d.data() as FirestoreItemDoc;
+    return {
+      id: d.id,
+      ownerId: data.ownerId,
+      title: data.title,
+      description: data.description,
+      photos: data.photos ?? [],
+      valueTier: data.valueTier,
+      pickupLocation: data.pickupLocation,
+      category: data.category,
+    };
+  });
+}
+
+/** Count how many unique users swiped right on a given item. */
+export async function fetchSwipeCount(itemId: string): Promise<number> {
+  if (!isFirebaseEnabled() || !db) return 0;
+  // Single-field query — no composite index needed. Filter direction in JS.
+  const snap = await getDocs(
+    query(collection(db, SWIPES_COLLECTION), where('targetItemId', '==', itemId))
+  );
+  const uniqueRightSwipers = new Set(
+    snap.docs
+      .filter((d) => d.data().direction === 'right')
+      .map((d) => String(d.data().swiperId))
+  );
+  return uniqueRightSwipers.size;
+}
+
+/** Save or update the Expo push token for a user. */
+export async function savePushToken(userId: string, token: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db) return;
+  await setDoc(
+    doc(db, USERS_COLLECTION, userId),
+    { pushToken: token },
+    { merge: true }
+  );
+}
+
+/** Permanently delete an item document from Firestore. */
+export async function deleteItem(itemId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  await deleteDoc(doc(db, ITEMS_COLLECTION, itemId));
+}
+
+/** Mark an item as traded. */
+export async function markItemAsTraded(itemId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  await updateDoc(doc(db, ITEMS_COLLECTION, itemId), { status: 'traded' as ItemStatus });
+}
+
+/**
  * Record a swipe event in the swipes collection.
+ *
+ * Uses a deterministic document ID (swiperId_targetItemId) so that:
+ *   - Deduplication is a single getDoc — no composite index needed
+ *   - Match checking is individual getDoc lookups — no composite index needed
+ *
+ * On a right-swipe:
+ *   - Checks for a mutual match via direct doc lookups (no queries).
+ *   - If matched: creates a match document and returns matched=true so the UI opens chat.
+ *   - If not matched: sends a "liked" mock notification to the item owner.
  */
 export async function recordSwipe(
   targetItemId: string,
   direction: SwipeDirection,
   myActiveItemId: string | null
-): Promise<void> {
+): Promise<SwipeResult> {
   if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
-    return;
+    return { matched: false };
   }
-  await addDoc(collection(db, SWIPES_COLLECTION), {
-    swiperId: auth.currentUser.uid,
+  const swiperId = auth.currentUser.uid;
+
+  // Deterministic doc ID — dedup is a single getDoc, no composite index needed
+  const swipeDocId = `${swiperId}_${targetItemId}`;
+  const swipeRef = doc(db, SWIPES_COLLECTION, swipeDocId);
+  const existingSnap = await getDoc(swipeRef);
+  if (existingSnap.exists()) return { matched: false };
+
+  await setDoc(swipeRef, {
+    swiperId,
     targetItemId,
     direction,
     myActiveItemId: myActiveItemId ?? null,
     createdAt: serverTimestamp(),
   });
+
+  if (direction !== 'right') return { matched: false };
+
+  try {
+    // Single doc read — no index needed
+    const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, targetItemId));
+    if (!itemSnap.exists()) return { matched: false };
+    const ownerId = String(itemSnap.data().ownerId ?? '');
+    if (!ownerId || ownerId === swiperId) return { matched: false };
+
+    // Single-field query (ownerId only) — no composite index needed.
+    // Filter status in JS.
+    const myItemsSnap = await getDocs(
+      query(collection(db, ITEMS_COLLECTION), where('ownerId', '==', swiperId))
+    );
+    const myActiveItemIds = myItemsSnap.docs
+      .filter((d) => d.data().status === 'active')
+      .map((d) => d.id);
+
+    // Match check: for each of my items, look up ${ownerId}_${myItemId} directly.
+    // getDoc on a known ID — zero queries, zero indexes needed.
+    let matchedMyItemId: string | null = null;
+    for (const myItemId of myActiveItemIds) {
+      const mutualRef = doc(db, SWIPES_COLLECTION, `${ownerId}_${myItemId}`);
+      const mutualSnap = await getDoc(mutualRef);
+      if (mutualSnap.exists() && mutualSnap.data().direction === 'right') {
+        matchedMyItemId = myItemId;
+        break;
+      }
+    }
+
+    if (matchedMyItemId) {
+      // ── MUTUAL MATCH ──────────────────────────────────────────────────────
+      await setDoc(doc(collection(db, MATCHES_COLLECTION)), {
+        participantIds: [swiperId, ownerId],
+        itemIds: [targetItemId, matchedMyItemId],
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+      // Fetch the owner's display name so the chat header shows a real name
+      const ownerProfileSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
+      const otherUserName = ownerProfileSnap.exists()
+        ? String(ownerProfileSnap.data().displayName ?? 'Trader')
+        : 'Trader';
+      return { matched: true, otherUserId: ownerId, otherUserName, itemId: targetItemId };
+    } else {
+      // ── LIKE ONLY ─────────────────────────────────────────────────────────
+      const ownerSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
+      const ownerToken = ownerSnap.exists() ? String(ownerSnap.data().pushToken ?? '') : '';
+      if (ownerToken) {
+        const { sendPushNotification } = await import('./notificationService');
+        await sendPushNotification(
+          ownerToken,
+          'Someone liked your item!',
+          'A trader is interested in your listing. Check it out!'
+        );
+      }
+      return { matched: false };
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[recordSwipe] match check failed:', e);
+    return { matched: false };
+  }
 }
 
 // ---------------------------------------------------------------------------
