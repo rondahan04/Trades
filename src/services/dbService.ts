@@ -68,6 +68,14 @@ export interface UpdateUserProfileInput {
 /** Swipe direction for recordSwipe */
 export type SwipeDirection = 'left' | 'right';
 
+/** Result returned by recordSwipe — indicates whether a mutual match was made. */
+export interface SwipeResult {
+  matched: boolean;
+  otherUserId?: string;
+  /** The item the current user just liked (targetItemId) */
+  itemId?: string;
+}
+
 /**
  * Resize, compress, and base64-encode item photos for storage in Firestore.
  * Same approach as profile pictures — no Firebase Storage needed, no Blob issues.
@@ -321,17 +329,18 @@ export async function markItemAsTraded(itemId: string): Promise<void> {
  * Record a swipe event in the swipes collection.
  * Deduplicates: if the user already swiped on this item, the call is a no-op.
  * On a right-swipe:
- *   - Notifies the item owner that someone liked their item.
  *   - Checks for a mutual match (owner previously right-swiped one of the current user's items).
- *   - If matched: creates a match document and fires match notifications for both users.
+ *   - If matched: creates a match document in Firestore and returns matched=true so the UI
+ *     can open a chat between the two users.
+ *   - If not matched: sends a "liked" mock notification to the item owner.
  */
 export async function recordSwipe(
   targetItemId: string,
   direction: SwipeDirection,
   myActiveItemId: string | null
-): Promise<void> {
+): Promise<SwipeResult> {
   if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
-    return;
+    return { matched: false };
   }
   const swiperId = auth.currentUser.uid;
 
@@ -342,7 +351,7 @@ export async function recordSwipe(
     where('targetItemId', '==', targetItemId)
   );
   const existing = await getDocs(dedupQ);
-  if (!existing.empty) return;
+  if (!existing.empty) return { matched: false };
 
   await addDoc(collection(db, SWIPES_COLLECTION), {
     swiperId,
@@ -352,24 +361,14 @@ export async function recordSwipe(
     createdAt: serverTimestamp(),
   });
 
-  if (direction !== 'right') return;
+  if (direction !== 'right') return { matched: false };
 
   try {
-    const { sendPushNotification } = await import('./notificationService');
-
     // Fetch the item being liked and its owner
     const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, targetItemId));
-    if (!itemSnap.exists()) return;
+    if (!itemSnap.exists()) return { matched: false };
     const ownerId = String(itemSnap.data().ownerId ?? '');
-    if (!ownerId || ownerId === swiperId) return;
-
-    // Fetch both users' push tokens in parallel
-    const [ownerSnap, mySnap] = await Promise.all([
-      getDoc(doc(db, USERS_COLLECTION, ownerId)),
-      getDoc(doc(db, USERS_COLLECTION, swiperId)),
-    ]);
-    const ownerToken = ownerSnap.exists() ? String(ownerSnap.data().pushToken ?? '') : '';
-    const myToken = mySnap.exists() ? String(mySnap.data().pushToken ?? '') : '';
+    if (!ownerId || ownerId === swiperId) return { matched: false };
 
     // Check for mutual match: has the item owner previously right-swiped any of the current user's items?
     const myItemsSnap = await getDocs(
@@ -383,7 +382,6 @@ export async function recordSwipe(
 
     let matchedMyItemId: string | null = null;
     if (myItemIds.length > 0) {
-      // Firestore 'in' queries support up to 10 values per chunk
       for (let i = 0; i < myItemIds.length; i += 10) {
         const chunk = myItemIds.slice(i, i + 10);
         const mutualSnap = await getDocs(
@@ -403,42 +401,32 @@ export async function recordSwipe(
 
     if (matchedMyItemId) {
       // ── MUTUAL MATCH ──────────────────────────────────────────────────────
-      // Create a match document in Firestore
       await setDoc(doc(collection(db, MATCHES_COLLECTION)), {
         participantIds: [swiperId, ownerId],
         itemIds: [targetItemId, matchedMyItemId],
         status: 'pending',
         createdAt: serverTimestamp(),
       });
-
-      // Notify the current user (shows immediately on their device via mock Alert)
-      await sendPushNotification(
-        myToken || 'local',
-        "It's a match! 🎉",
-        'You and another trader both want to swap. Open Chat to connect!'
-      );
-
-      // Notify the other user (also fires on current device in mock mode)
-      if (ownerToken) {
-        await sendPushNotification(
-          ownerToken,
-          "It's a match! 🎉",
-          'Someone wants to trade with you. Open Chat to connect!'
-        );
-      }
+      // Return match info — the UI will open the chat and show the overlay
+      return { matched: true, otherUserId: ownerId, itemId: targetItemId };
     } else {
       // ── LIKE ONLY ─────────────────────────────────────────────────────────
       // Notify the item owner that someone liked their listing
+      const ownerSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
+      const ownerToken = ownerSnap.exists() ? String(ownerSnap.data().pushToken ?? '') : '';
       if (ownerToken) {
+        const { sendPushNotification } = await import('./notificationService');
         await sendPushNotification(
           ownerToken,
           'Someone liked your item!',
           'A trader is interested in your listing. Check it out!'
         );
       }
+      return { matched: false };
     }
   } catch (e) {
-    if (__DEV__) console.warn('[recordSwipe] notification/match check failed:', e);
+    if (__DEV__) console.warn('[recordSwipe] match check failed:', e);
+    return { matched: false };
   }
 }
 

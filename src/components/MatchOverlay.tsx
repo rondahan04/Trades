@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, Pressable, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Modal, Pressable, TouchableOpacity, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -16,13 +16,16 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 interface MatchOverlayProps {
   visible: boolean;
   onDismiss: () => void;
-  /** Optional: show after this ms (default 1600) */
+  /** When provided, shows "Start Chatting" + "Maybe Later" buttons instead of auto-dismissing */
+  onStartChat?: () => void;
+  /** Optional: auto-dismiss after this ms. Ignored when onStartChat is provided. (default 1600) */
   autoDismissMs?: number;
 }
 
 export function MatchOverlay({
   visible,
   onDismiss,
+  onStartChat,
   autoDismissMs = 1600,
 }: MatchOverlayProps) {
   const scale = useSharedValue(0.3);
@@ -45,9 +48,12 @@ export function MatchOverlay({
       )
     );
 
-    const t = setTimeout(() => onDismiss(), autoDismissMs);
-    return () => clearTimeout(t);
-  }, [visible, autoDismissMs, onDismiss]);
+    // Only auto-dismiss when there's no chat action to take
+    if (!onStartChat) {
+      const t = setTimeout(() => onDismiss(), autoDismissMs);
+      return () => clearTimeout(t);
+    }
+  }, [visible, autoDismissMs, onDismiss, onStartChat]);
 
   const cardStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -75,7 +81,17 @@ export function MatchOverlay({
               <Ionicons name="heart" size={72} color={colors.swipeRight} />
             </Animated.View>
             <Text style={styles.title}>It's a match!</Text>
-            <Text style={styles.subtitle}>You want to trade. Start a chat to arrange it.</Text>
+            <Text style={styles.subtitle}>You both want to trade. Start chatting to arrange it!</Text>
+            {onStartChat && (
+              <View style={styles.actions}>
+                <TouchableOpacity style={styles.chatButton} onPress={onStartChat}>
+                  <Text style={styles.chatButtonText}>Start Chatting →</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.laterButton} onPress={onDismiss}>
+                  <Text style={styles.laterButtonText}>Maybe Later</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </Animated.View>
         </View>
       </Pressable>
@@ -118,5 +134,30 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 8,
     textAlign: 'center',
+  },
+  actions: {
+    marginTop: 24,
+    width: '100%',
+    gap: 10,
+  },
+  chatButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  chatButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textOnPrimary,
+  },
+  laterButton: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  laterButtonText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    fontWeight: '500',
   },
 });
