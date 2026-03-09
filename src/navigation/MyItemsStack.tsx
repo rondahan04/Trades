@@ -1,7 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MyItemsScreen } from '../screens/MyItemsScreen';
-import { ItemDetailScreen } from '../screens/ItemDetailScreen';
+import { MyItemDashboardScreen } from '../screens/MyItemDashboardScreen';
 import { NewItemScreen } from '../screens/NewItemScreen';
 import { colors } from '../theme';
 
@@ -30,7 +30,7 @@ export function MyItemsStack() {
       />
       <Stack.Screen
         name="MyItemsItemDetail"
-        component={ItemDetailScreen}
+        component={MyItemDashboardScreen}
         options={{ title: 'Item', headerShown: true }}
       />
       <Stack.Screen

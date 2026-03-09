@@ -13,6 +13,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -275,6 +276,34 @@ export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
       category: data.category,
     };
   });
+}
+
+/** Count how many users swiped right on a given item. */
+export async function fetchSwipeCount(itemId: string): Promise<number> {
+  if (!isFirebaseEnabled() || !db) return 0;
+  const q = query(
+    collection(db, SWIPES_COLLECTION),
+    where('targetItemId', '==', itemId),
+    where('direction', '==', 'right')
+  );
+  const snap = await getDocs(q);
+  return snap.size;
+}
+
+/** Permanently delete an item document from Firestore. */
+export async function deleteItem(itemId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  await deleteDoc(doc(db, ITEMS_COLLECTION, itemId));
+}
+
+/** Mark an item as traded. */
+export async function markItemAsTraded(itemId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) {
+    throw new Error('Firebase not configured or user not signed in.');
+  }
+  await updateDoc(doc(db, ITEMS_COLLECTION, itemId), { status: 'traded' as ItemStatus });
 }
 
 /**
