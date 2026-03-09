@@ -289,14 +289,16 @@ export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
 /** Count how many unique users swiped right on a given item. */
 export async function fetchSwipeCount(itemId: string): Promise<number> {
   if (!isFirebaseEnabled() || !db) return 0;
-  const q = query(
-    collection(db, SWIPES_COLLECTION),
-    where('targetItemId', '==', itemId),
-    where('direction', '==', 'right')
+  // Single-field query — no composite index needed. Filter direction in JS.
+  const snap = await getDocs(
+    query(collection(db, SWIPES_COLLECTION), where('targetItemId', '==', itemId))
   );
-  const snap = await getDocs(q);
-  const uniqueSwipers = new Set(snap.docs.map((d) => String(d.data().swiperId)));
-  return uniqueSwipers.size;
+  const uniqueRightSwipers = new Set(
+    snap.docs
+      .filter((d) => d.data().direction === 'right')
+      .map((d) => String(d.data().swiperId))
+  );
+  return uniqueRightSwipers.size;
 }
 
 /** Save or update the Expo push token for a user. */
@@ -327,11 +329,14 @@ export async function markItemAsTraded(itemId: string): Promise<void> {
 
 /**
  * Record a swipe event in the swipes collection.
- * Deduplicates: if the user already swiped on this item, the call is a no-op.
+ *
+ * Uses a deterministic document ID (swiperId_targetItemId) so that:
+ *   - Deduplication is a single getDoc — no composite index needed
+ *   - Match checking is individual getDoc lookups — no composite index needed
+ *
  * On a right-swipe:
- *   - Checks for a mutual match (owner previously right-swiped one of the current user's items).
- *   - If matched: creates a match document in Firestore and returns matched=true so the UI
- *     can open a chat between the two users.
+ *   - Checks for a mutual match via direct doc lookups (no queries).
+ *   - If matched: creates a match document and returns matched=true so the UI opens chat.
  *   - If not matched: sends a "liked" mock notification to the item owner.
  */
 export async function recordSwipe(
@@ -344,16 +349,13 @@ export async function recordSwipe(
   }
   const swiperId = auth.currentUser.uid;
 
-  // Deduplication: skip if this user already swiped on this item
-  const dedupQ = query(
-    collection(db, SWIPES_COLLECTION),
-    where('swiperId', '==', swiperId),
-    where('targetItemId', '==', targetItemId)
-  );
-  const existing = await getDocs(dedupQ);
-  if (!existing.empty) return { matched: false };
+  // Deterministic doc ID — dedup is a single getDoc, no composite index needed
+  const swipeDocId = `${swiperId}_${targetItemId}`;
+  const swipeRef = doc(db, SWIPES_COLLECTION, swipeDocId);
+  const existingSnap = await getDoc(swipeRef);
+  if (existingSnap.exists()) return { matched: false };
 
-  await addDoc(collection(db, SWIPES_COLLECTION), {
+  await setDoc(swipeRef, {
     swiperId,
     targetItemId,
     direction,
@@ -364,38 +366,30 @@ export async function recordSwipe(
   if (direction !== 'right') return { matched: false };
 
   try {
-    // Fetch the item being liked and its owner
+    // Single doc read — no index needed
     const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, targetItemId));
     if (!itemSnap.exists()) return { matched: false };
     const ownerId = String(itemSnap.data().ownerId ?? '');
     if (!ownerId || ownerId === swiperId) return { matched: false };
 
-    // Check for mutual match: has the item owner previously right-swiped any of the current user's items?
+    // Single-field query (ownerId only) — no composite index needed.
+    // Filter status in JS.
     const myItemsSnap = await getDocs(
-      query(
-        collection(db, ITEMS_COLLECTION),
-        where('ownerId', '==', swiperId),
-        where('status', '==', 'active')
-      )
+      query(collection(db, ITEMS_COLLECTION), where('ownerId', '==', swiperId))
     );
-    const myItemIds = myItemsSnap.docs.map((d) => d.id);
+    const myActiveItemIds = myItemsSnap.docs
+      .filter((d) => d.data().status === 'active')
+      .map((d) => d.id);
 
+    // Match check: for each of my items, look up ${ownerId}_${myItemId} directly.
+    // getDoc on a known ID — zero queries, zero indexes needed.
     let matchedMyItemId: string | null = null;
-    if (myItemIds.length > 0) {
-      for (let i = 0; i < myItemIds.length; i += 10) {
-        const chunk = myItemIds.slice(i, i + 10);
-        const mutualSnap = await getDocs(
-          query(
-            collection(db, SWIPES_COLLECTION),
-            where('swiperId', '==', ownerId),
-            where('targetItemId', 'in', chunk),
-            where('direction', '==', 'right')
-          )
-        );
-        if (!mutualSnap.empty) {
-          matchedMyItemId = String(mutualSnap.docs[0].data().targetItemId);
-          break;
-        }
+    for (const myItemId of myActiveItemIds) {
+      const mutualRef = doc(db, SWIPES_COLLECTION, `${ownerId}_${myItemId}`);
+      const mutualSnap = await getDoc(mutualRef);
+      if (mutualSnap.exists() && mutualSnap.data().direction === 'right') {
+        matchedMyItemId = myItemId;
+        break;
       }
     }
 
@@ -407,11 +401,9 @@ export async function recordSwipe(
         status: 'pending',
         createdAt: serverTimestamp(),
       });
-      // Return match info — the UI will open the chat and show the overlay
       return { matched: true, otherUserId: ownerId, itemId: targetItemId };
     } else {
       // ── LIKE ONLY ─────────────────────────────────────────────────────────
-      // Notify the item owner that someone liked their listing
       const ownerSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
       const ownerToken = ownerSnap.exists() ? String(ownerSnap.data().pushToken ?? '') : '';
       if (ownerToken) {

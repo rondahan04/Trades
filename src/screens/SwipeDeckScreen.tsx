@@ -95,19 +95,23 @@ export function SwipeDeckScreen() {
   }, [matchedOtherUserId, matchedItemId, onMatchOverlayDismiss, navigation]);
 
   const onSwipeComplete = useCallback(
-    async (direction: SwipeDirection) => {
+    (direction: SwipeDirection) => {
       const top = deck[0];
-      if (top) {
-        const result = await recordSwipe(top.id, direction, null);
-        if (result.matched && result.otherUserId) {
-          setMatchedOtherUserId(result.otherUserId);
-          setMatchedItemId(result.itemId ?? null);
-        }
-      }
       if (direction === 'right' && top) {
+        // Show overlay immediately (don't wait for Firestore)
         setPendingMatchItemId(top.id);
         setShowMatchOverlay(true);
+        // Run match check in background — updates overlay if a real match is found
+        recordSwipe(top.id, direction, null)
+          .then((result) => {
+            if (result.matched && result.otherUserId) {
+              setMatchedOtherUserId(result.otherUserId);
+              setMatchedItemId(result.itemId ?? null);
+            }
+          })
+          .catch(() => {});
       } else {
+        if (top) recordSwipe(top.id, direction, null).catch(() => {});
         setDeck((prev) => prev.slice(1));
       }
     },
@@ -218,6 +222,7 @@ export function SwipeDeckScreen() {
         visible={showMatchOverlay}
         onDismiss={onMatchOverlayDismiss}
         onStartChat={matchedOtherUserId ? onStartChat : undefined}
+        autoDismissMs={5000}
       />
     </View>
   );
