@@ -1,5 +1,6 @@
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 // Show alerts even when the app is foregrounded.
@@ -15,41 +16,48 @@ Notifications.setNotificationHandler({
 
 /**
  * Request notification permissions and return the Expo push token.
- * Returns null on simulators or if the user denies permission.
+ * Returns undefined on simulators or if the user denies permission.
  */
-export async function registerForPushNotifications(): Promise<string | null> {
+export async function registerForPushNotificationsAsync(): Promise<string | undefined> {
   if (!Device.isDevice) {
-    if (__DEV__) console.log('[notifications] Push tokens require a physical device');
-    return null;
+    console.log('Must use physical device for Push Notifications');
+    return;
   }
 
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'Default',
-      importance: Notifications.AndroidImportance.MAX,
-    });
-  }
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
 
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  let finalStatus = existing;
-
-  if (existing !== 'granted') {
+  if (existingStatus !== 'granted') {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
 
   if (finalStatus !== 'granted') {
-    if (__DEV__) console.log('[notifications] Permission denied');
-    return null;
+    console.log('Failed to get push token for push notification!');
+    return;
   }
 
-  try {
-    const token = (await Notifications.getExpoPushTokenAsync()).data;
-    return token;
-  } catch (e) {
-    if (__DEV__) console.warn('[notifications] getExpoPushTokenAsync failed:', e);
-    return null;
+  const projectId =
+    Constants?.expoConfig?.extra?.eas?.projectId ??
+    Constants?.easConfig?.projectId;
+
+  if (!projectId) {
+    console.warn("Project ID not found. Did you run 'npx eas-cli init'?");
+    return;
   }
+
+  const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
+
+  if (Platform.OS === 'android') {
+    Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
+
+  return tokenData.data;
 }
 
 /**

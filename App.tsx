@@ -7,7 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, AppDataProvider, useAuth, useAppData } from './src/contexts';
 import { ChatProvider } from './src/contexts';
 import { RootNavigator } from './src/navigation';
-import { registerForPushNotifications } from './src/services/notificationService';
+import { registerForPushNotificationsAsync } from './src/services/notificationService';
 import { savePushToken } from './src/services/dbService';
 import { isFirebaseEnabled } from './src/config/firebase';
 
@@ -19,7 +19,7 @@ function AppContent() {
   useEffect(() => {
     if (!user || !isFirebaseEnabled() || registeredForRef.current === user.id) return;
     registeredForRef.current = user.id;
-    registerForPushNotifications().then((token) => {
+    registerForPushNotificationsAsync().then((token) => {
       if (token) savePushToken(user.id, token).catch(() => {});
     });
   }, [user]);
