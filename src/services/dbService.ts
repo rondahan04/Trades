@@ -320,7 +320,10 @@ export async function markItemAsTraded(itemId: string): Promise<void> {
 /**
  * Record a swipe event in the swipes collection.
  * Deduplicates: if the user already swiped on this item, the call is a no-op.
- * On a right-swipe, sends a push notification to the item owner if they have a push token.
+ * On a right-swipe:
+ *   - Notifies the item owner that someone liked their item.
+ *   - Checks for a mutual match (owner previously right-swiped one of the current user's items).
+ *   - If matched: creates a match document and fires match notifications for both users.
  */
 export async function recordSwipe(
   targetItemId: string,
@@ -349,30 +352,93 @@ export async function recordSwipe(
     createdAt: serverTimestamp(),
   });
 
-  // Send push notification to item owner on right-swipe
-  if (direction === 'right') {
-    try {
-      const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, targetItemId));
-      if (itemSnap.exists()) {
-        const ownerId = String(itemSnap.data().ownerId ?? '');
-        if (ownerId && ownerId !== swiperId) {
-          const ownerSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
-          const pushToken: string | undefined = ownerSnap.exists()
-            ? String(ownerSnap.data().pushToken ?? '')
-            : undefined;
-          if (pushToken && pushToken.startsWith('ExponentPushToken')) {
-            const { sendPushNotification } = await import('./notificationService');
-            await sendPushNotification(
-              pushToken,
-              'Someone liked your item!',
-              'A trader is interested in your listing. Check it out!'
-            );
-          }
+  if (direction !== 'right') return;
+
+  try {
+    const { sendPushNotification } = await import('./notificationService');
+
+    // Fetch the item being liked and its owner
+    const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, targetItemId));
+    if (!itemSnap.exists()) return;
+    const ownerId = String(itemSnap.data().ownerId ?? '');
+    if (!ownerId || ownerId === swiperId) return;
+
+    // Fetch both users' push tokens in parallel
+    const [ownerSnap, mySnap] = await Promise.all([
+      getDoc(doc(db, USERS_COLLECTION, ownerId)),
+      getDoc(doc(db, USERS_COLLECTION, swiperId)),
+    ]);
+    const ownerToken = ownerSnap.exists() ? String(ownerSnap.data().pushToken ?? '') : '';
+    const myToken = mySnap.exists() ? String(mySnap.data().pushToken ?? '') : '';
+
+    // Check for mutual match: has the item owner previously right-swiped any of the current user's items?
+    const myItemsSnap = await getDocs(
+      query(
+        collection(db, ITEMS_COLLECTION),
+        where('ownerId', '==', swiperId),
+        where('status', '==', 'active')
+      )
+    );
+    const myItemIds = myItemsSnap.docs.map((d) => d.id);
+
+    let matchedMyItemId: string | null = null;
+    if (myItemIds.length > 0) {
+      // Firestore 'in' queries support up to 10 values per chunk
+      for (let i = 0; i < myItemIds.length; i += 10) {
+        const chunk = myItemIds.slice(i, i + 10);
+        const mutualSnap = await getDocs(
+          query(
+            collection(db, SWIPES_COLLECTION),
+            where('swiperId', '==', ownerId),
+            where('targetItemId', 'in', chunk),
+            where('direction', '==', 'right')
+          )
+        );
+        if (!mutualSnap.empty) {
+          matchedMyItemId = String(mutualSnap.docs[0].data().targetItemId);
+          break;
         }
       }
-    } catch (e) {
-      if (__DEV__) console.warn('[recordSwipe] push notification failed:', e);
     }
+
+    if (matchedMyItemId) {
+      // ── MUTUAL MATCH ──────────────────────────────────────────────────────
+      // Create a match document in Firestore
+      await setDoc(doc(collection(db, MATCHES_COLLECTION)), {
+        participantIds: [swiperId, ownerId],
+        itemIds: [targetItemId, matchedMyItemId],
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+
+      // Notify the current user (shows immediately on their device via mock Alert)
+      await sendPushNotification(
+        myToken || 'local',
+        "It's a match! 🎉",
+        'You and another trader both want to swap. Open Chat to connect!'
+      );
+
+      // Notify the other user (also fires on current device in mock mode)
+      if (ownerToken) {
+        await sendPushNotification(
+          ownerToken,
+          "It's a match! 🎉",
+          'Someone wants to trade with you. Open Chat to connect!'
+        );
+      }
+    } else {
+      // ── LIKE ONLY ─────────────────────────────────────────────────────────
+      // Notify the item owner that someone liked their listing
+      if (ownerToken) {
+        await sendPushNotification(
+          ownerToken,
+          'Someone liked your item!',
+          'A trader is interested in your listing. Check it out!'
+        );
+      }
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[recordSwipe] notification/match check failed:', e);
   }
 }
 
