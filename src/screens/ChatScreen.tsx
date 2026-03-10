@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -51,7 +52,14 @@ export function ChatScreen({
   const [showEmoji, setShowEmoji] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [swipeToDelete, setSwipeToDelete] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const touchStartXRef = useRef(0);
+  const swipeToDeleteRef = useRef(false);
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const dotAnim = useRef(new Animated.Value(0)).current;
   const soundRef = useRef<Audio.Sound | null>(null);
   const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -82,6 +90,32 @@ export function ChatScreen({
     if (!user?.id || !isFirebaseEnabled()) return;
     fetchUserProfile(user.id).then((p) => { if (p) setMyProfile(p); }).catch(() => {});
   }, [user?.id]);
+
+  // Recording timer
+  useEffect(() => {
+    if (isRecording) {
+      timerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    }
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  }, [isRecording]);
+
+  // Animated dots while recording
+  useEffect(() => {
+    if (isRecording) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(dotAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+          Animated.timing(dotAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      dotAnim.setValue(0.3);
+    }
+  }, [isRecording, dotAnim]);
 
   // Fetch both trade items
   useEffect(() => {
@@ -143,7 +177,13 @@ export function ChatScreen({
     setInput((prev) => prev + emoji);
   }, []);
 
-  const handleRecordStart = useCallback(async () => {
+  const formatRecordTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const startRecording = useCallback(async () => {
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') return;
@@ -152,13 +192,26 @@ export function ChatScreen({
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
       recordingRef.current = recording;
+      setRecordingSeconds(0);
+      setSwipeToDelete(false);
+      swipeToDeleteRef.current = false;
+      swipeX.setValue(0);
       setIsRecording(true);
-    } catch {
-      // silently fail
-    }
-  }, []);
+    } catch {}
+  }, [swipeX]);
 
-  const handleRecordStop = useCallback(async () => {
+  const cancelRecording = useCallback(async () => {
+    try { await recordingRef.current?.stopAndUnloadAsync(); } catch {}
+    recordingRef.current = null;
+    setIsRecording(false);
+    setRecordingSeconds(0);
+    setSwipeToDelete(false);
+    swipeToDeleteRef.current = false;
+    swipeX.setValue(0);
+    Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
+  }, [swipeX]);
+
+  const sendRecording = useCallback(async () => {
     if (!recordingRef.current) return;
     try {
       setIsRecording(false);
@@ -166,15 +219,14 @@ export function ChatScreen({
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
+      setRecordingSeconds(0);
       if (!uri) return;
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: 'base64',
-      });
-      const dataUrl = `data:audio/m4a;base64,${base64}`;
-      sendMessage(otherUserId, dataUrl);
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+      sendMessage(otherUserId, `data:audio/m4a;base64,${base64}`);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     } catch {
       recordingRef.current = null;
+      setRecordingSeconds(0);
     }
   }, [otherUserId, sendMessage]);
 
@@ -401,35 +453,55 @@ export function ChatScreen({
         </View>
       )}
 
-      {/* Input bar */}
-      {isRecording ? (
-        <View style={[styles.inputBar, styles.recordingBar]}>
-          <View style={styles.recordingIndicator}>
-            <View style={styles.recordingDot} />
-            <Text style={styles.recordingText}>Recording… release to send</Text>
-          </View>
+      {/* Input bar — unified, same height in all states */}
+      <View style={styles.inputBar}>
+        {/* Left: image picker (normal) OR trash icon (recording) */}
+        {isRecording ? (
+          <Ionicons
+            name="trash-outline"
+            size={22}
+            color={swipeToDelete ? '#E53E3E' : colors.textSecondary}
+            style={styles.iconBtn}
+          />
+        ) : !hasInput ? (
           <TouchableOpacity
-            style={styles.micBtn}
-            onPressOut={handleRecordStop}
+            style={styles.iconBtn}
+            onPress={handlePickImage}
+            disabled={imageUploading}
           >
-            <Ionicons name="stop-circle" size={30} color="#E53E3E" />
+            {imageUploading
+              ? <ActivityIndicator size="small" color={colors.primaryDark} />
+              : <Ionicons name="image-outline" size={24} color={colors.primaryDark} />
+            }
           </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={styles.inputBar}>
-          {!hasInput && (
-            <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={handlePickImage}
-              disabled={imageUploading}
-            >
-              {imageUploading
-                ? <ActivityIndicator size="small" color={colors.primaryDark} />
-                : <Ionicons name="image-outline" size={24} color={colors.primaryDark} />
-              }
-            </TouchableOpacity>
-          )}
+        ) : null}
 
+        {/* Center: text input OR recording indicator */}
+        {isRecording ? (
+          <Animated.View
+            style={[styles.recSlide, { transform: [{ translateX: swipeX }] }]}
+          >
+            <Text style={styles.recTimer}>{formatRecordTime(recordingSeconds)}</Text>
+            <View style={styles.recDotsRow}>
+              {Array.from({ length: 12 }).map((_, i) => (
+                <Animated.View
+                  key={i}
+                  style={[styles.recDot, {
+                    opacity: dotAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [i % 2 === 0 ? 0.2 : 0.55, i % 2 === 0 ? 0.65 : 0.2],
+                    }),
+                    height: 4 + (i % 3) * 3,
+                  }]}
+                />
+              ))}
+            </View>
+            <View style={styles.recHintRow}>
+              <Ionicons name="chevron-back" size={12} color={colors.textSecondary} />
+              <Text style={styles.recHintText}>slide to cancel</Text>
+            </View>
+          </Animated.View>
+        ) : (
           <View style={styles.inputWrap}>
             <TextInput
               style={styles.input}
@@ -452,27 +524,61 @@ export function ChatScreen({
               />
             </TouchableOpacity>
           </View>
+        )}
 
-          {hasInput ? (
-            <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
-              <Ionicons name="send" size={18} color={colors.textOnPrimary} />
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={styles.micBtn}
-                onPressIn={handleRecordStart}
-                onPressOut={handleRecordStop}
-              >
-                <Ionicons name="mic-outline" size={24} color={colors.primaryDark} />
-              </TouchableOpacity>
+        {/* Right: send (typing) OR mic+thumbsup (idle/recording) */}
+        {hasInput && !isRecording ? (
+          <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
+            <Ionicons name="send" size={18} color={colors.textOnPrimary} />
+          </TouchableOpacity>
+        ) : (
+          <>
+            {/* Mic — always at same tree position; hold to record, swipe left to cancel */}
+            <View
+              style={[styles.micBtn, isRecording && styles.micBtnActive]}
+              onStartShouldSetResponder={() => true}
+              onResponderGrant={(e) => {
+                touchStartXRef.current = e.nativeEvent.pageX;
+                startRecording();
+              }}
+              onResponderMove={(e) => {
+                const dx = e.nativeEvent.pageX - touchStartXRef.current;
+                if (dx < 0) {
+                  swipeX.setValue(dx);
+                  const del = dx < -70;
+                  if (del !== swipeToDeleteRef.current) {
+                    swipeToDeleteRef.current = del;
+                    setSwipeToDelete(del);
+                  }
+                }
+              }}
+              onResponderRelease={() => {
+                if (swipeToDeleteRef.current) {
+                  cancelRecording();
+                } else {
+                  sendRecording();
+                }
+                swipeToDeleteRef.current = false;
+                setSwipeToDelete(false);
+              }}
+              onResponderTerminate={() => {
+                cancelRecording();
+              }}
+            >
+              <Ionicons
+                name={isRecording ? 'mic' : 'mic-outline'}
+                size={24}
+                color={isRecording ? '#E53E3E' : colors.primaryDark}
+              />
+            </View>
+            {!isRecording && (
               <TouchableOpacity style={styles.iconBtn} onPress={handleSendLike}>
                 <Ionicons name="thumbs-up" size={24} color={colors.primaryDark} />
               </TouchableOpacity>
-            </>
-          )}
-        </View>
-      )}
+            )}
+          </>
+        )}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -584,12 +690,44 @@ const styles = StyleSheet.create({
   emojiToggle: { paddingLeft: 6, paddingBottom: 2, justifyContent: 'flex-end' },
   sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
 
-  // Mic / audio
+  // Mic button
   micBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
-  recordingBar: { justifyContent: 'space-between' },
-  recordingIndicator: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  recordingDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#E53E3E' },
-  recordingText: { fontSize: 14, color: colors.textSecondary, fontStyle: 'italic' },
+  micBtnActive: { backgroundColor: 'rgba(229,83,83,0.12)' },
+
+  // Recording inline UI (fits inside inputBar — same height)
+  recSlide: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  recTimer: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    minWidth: 38,
+  },
+  recDotsRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  recDot: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+  },
+  recHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+  },
+  recHintText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
 
   // Audio bubble
   bubbleAudio: { paddingVertical: 10, paddingHorizontal: 12 },
