@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SwipeableItemCard, SwipeDirection } from '../components/SwipeableItemCard';
 import { MatchOverlay } from '../components/MatchOverlay';
+import { AdCard, type AdDeckItem } from '../components/AdCard';
 import { MOCK_ITEMS } from '../utils/mockData';
 import { useAppData, useAuth } from '../contexts';
 import type { Item } from '../utils/mockData';
@@ -14,6 +15,42 @@ import { fetchSwipeDeck, recordSwipe } from '../services/dbService';
 import type { TabParamList } from '../navigation/TabNavigator';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { isFirebaseEnabled } from '../config/firebase';
+
+// ── Ad data ───────────────────────────────────────────────────────────────────
+const MOCK_ADS: AdDeckItem[] = [
+  {
+    id: 'ad-1', isAd: true,
+    adTitle: 'Trade Smarter with Trades Pro',
+    adBody: 'Get unlimited swipes, priority matching, and exclusive items near you.',
+  },
+  {
+    id: 'ad-2', isAd: true,
+    adTitle: 'Invite Friends & Earn',
+    adBody: 'Refer a friend and earn bonus swipes when they complete their first trade!',
+  },
+  {
+    id: 'ad-3', isAd: true,
+    adTitle: 'Safe Trading Tips',
+    adBody: 'Always meet in public places and use in-app chat to confirm details before meeting.',
+  },
+];
+
+type DeckEntry = Item | AdDeckItem;
+
+/** Insert one ad every AD_INTERVAL real items (after the 3rd, 8th, 13th…) */
+function insertAds(items: Item[]): DeckEntry[] {
+  const AD_INTERVAL = 5;
+  const result: DeckEntry[] = [];
+  let adIndex = 0;
+  items.forEach((item, i) => {
+    result.push(item);
+    if ((i + 1) % AD_INTERVAL === 0 && i + 1 < items.length) {
+      result.push(MOCK_ADS[adIndex % MOCK_ADS.length]);
+      adIndex++;
+    }
+  });
+  return result;
+}
 
 const TIERS: ValueTier[] = ['$', '$$', '$$$'];
 const CATEGORIES: ItemCategory[] = [
@@ -47,7 +84,7 @@ export function SwipeDeckScreen() {
   const { addMatch } = useAppData();
   const [tierFilter, setTierFilter] = useState<ValueTier | 'all'>('$$');
   const [categoryFilter, setCategoryFilter] = useState<ItemCategory | 'all'>('all');
-  const [deck, setDeck] = useState<Item[]>(() => getFilteredItems('$$', 'all'));
+  const [deck, setDeck] = useState<DeckEntry[]>(() => insertAds(getFilteredItems('$$', 'all')));
   const [deckLoading, setDeckLoading] = useState(false);
   const [showMatchOverlay, setShowMatchOverlay] = useState(false);
   const [pendingMatchItemId, setPendingMatchItemId] = useState<string | null>(null);
@@ -55,31 +92,33 @@ export function SwipeDeckScreen() {
   const [matchedOtherUserName, setMatchedOtherUserName] = useState<string | undefined>(undefined);
   const [matchedItemId, setMatchedItemId] = useState<string | null>(null);
 
-  const loadDeck = useCallback(async (tier: ValueTier | 'all') => {
+  const loadDeck = useCallback(async (tier: ValueTier | 'all', category: ItemCategory | 'all') => {
     if (isFirebaseEnabled() && user) {
       setDeckLoading(true);
       try {
         const fbTier = tier === 'all' ? null : tier;
         const items = await fetchSwipeDeck(fbTier, user.id);
-        const filtered = categoryFilter === 'all'
+        const filtered = category === 'all'
           ? items
-          : items.filter((i) => i.category === categoryFilter);
-        setDeck(filtered.length > 0 ? shuffle(filtered) : getFilteredItems(tier, categoryFilter));
-      } catch (e) {
-        console.error('fetchSwipeDeck failed, using mock', e);
-        setDeck(getFilteredItems(tier, categoryFilter));
+          : items.filter((i) => i.category === category);
+        const base = filtered.length > 0 ? shuffle(filtered) : getFilteredItems(tier, category);
+        setDeck(insertAds(base));
+      } catch {
+        setDeck(insertAds(getFilteredItems(tier, category)));
       } finally {
         setDeckLoading(false);
       }
     } else {
-      setDeck(getFilteredItems(tier, categoryFilter));
+      setDeck(insertAds(getFilteredItems(tier, category)));
       setDeckLoading(false);
     }
-  }, [user, categoryFilter]);
+  }, [user]);
 
+  // Single effect for both tier and category changes
   useEffect(() => {
-    loadDeck(tierFilter);
-  }, [tierFilter]);
+    loadDeck(tierFilter, categoryFilter);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierFilter, categoryFilter]);
 
   const onMatchOverlayDismiss = useCallback(() => {
     const hadMatch = !!pendingMatchItemId;
@@ -114,7 +153,8 @@ export function SwipeDeckScreen() {
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection) => {
       const top = deck[0];
-      if (direction === 'right' && top) {
+      if (!top || 'isAd' in top) { setDeck((prev) => prev.slice(1)); return; }
+      if (direction === 'right') {
         recordSwipe(top.id, direction, null)
           .then((result) => {
             if (result.matched && result.otherUserId) {
@@ -127,11 +167,9 @@ export function SwipeDeckScreen() {
               setDeck((prev) => prev.slice(1));
             }
           })
-          .catch(() => {
-            setDeck((prev) => prev.slice(1));
-          });
+          .catch(() => { setDeck((prev) => prev.slice(1)); });
       } else {
-        if (top) recordSwipe(top.id, direction, null).catch(() => {});
+        recordSwipe(top.id, direction, null).catch(() => {});
         setDeck((prev) => prev.slice(1));
       }
     },
@@ -139,15 +177,12 @@ export function SwipeDeckScreen() {
   );
 
   const onTierChange = useCallback((tier: ValueTier | 'all') => {
-    setTierFilter(tier);
-    loadDeck(tier);
-  }, [loadDeck]);
+    setTierFilter(tier); // useEffect re-runs loadDeck
+  }, []);
 
   const onCategoryChange = useCallback((category: ItemCategory | 'all') => {
-    setCategoryFilter(category);
-    const list = getFilteredItems(tierFilter, category);
-    setDeck(list);
-  }, [tierFilter]);
+    setCategoryFilter(category); // useEffect re-runs loadDeck
+  }, []);
 
   if (deckLoading && deck.length === 0) {
     return (
@@ -201,20 +236,31 @@ export function SwipeDeckScreen() {
       </ScrollView>
 
       <View style={styles.deckContainer}>
-        {deck.map((item, index) => {
+        {deck.map((entry, index) => {
           const isTop = index === 0;
           const zIndex = deck.length - index;
+          const isAd = 'isAd' in entry;
           return (
             <View
-              key={item.id}
+              key={entry.id}
               style={[styles.cardWrapper, { zIndex }]}
               pointerEvents={isTop ? 'auto' : 'none'}
             >
-              <SwipeableItemCard
-                item={item}
-                onSwipeComplete={onSwipeComplete}
-                onPressDetail={() => navigation.navigate('SwipeItemDetail', { itemId: item.id })}
-              />
+              {isTop && isAd ? (
+                <AdCard
+                  ad={entry as AdDeckItem}
+                  onDismiss={() => setDeck((prev) => prev.slice(1))}
+                />
+              ) : !isAd ? (
+                <SwipeableItemCard
+                  item={entry as Item}
+                  onSwipeComplete={onSwipeComplete}
+                  onPressDetail={() => navigation.navigate('SwipeItemDetail', { itemId: entry.id })}
+                />
+              ) : (
+                // Non-top ad: render a blank placeholder for deck depth
+                <View style={styles.adPlaceholder} />
+              )}
             </View>
           );
         })}
@@ -335,5 +381,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  adPlaceholder: {
+    width: '88%' as `${number}%`,
+    aspectRatio: 1.1,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
 });

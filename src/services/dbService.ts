@@ -686,3 +686,49 @@ export async function fetchUserProfile(userId: string): Promise<import('../utils
     return null;
   }
 }
+export interface UserReview {
+  id: string;
+  reviewerName: string;
+  rating: number;
+  comment: string;
+  timestamp: number;
+}
+
+/** Fetch reviews left for a user (revieweeId == userId). */
+export async function fetchUserReviews(userId: string): Promise<UserReview[]> {
+  if (!isFirebaseEnabled() || !db) return [];
+  try {
+    const snap = await getDocs(
+      query(collection(db, REVIEWS_COLLECTION), where('revieweeId', '==', userId), limit(30))
+    );
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        reviewerName: String(data.reviewerName ?? 'Trader'),
+        rating: Number(data.rating ?? 5),
+        comment: String(data.text ?? data.comment ?? ''),
+        timestamp: Number(data.timestamp ?? 0),
+      };
+    }).sort((a, b) => b.timestamp - a.timestamp);
+  } catch {
+    return [];
+  }
+}
+
+/** Count completed trades a user has participated in. */
+export async function fetchUserTradeCount(userId: string): Promise<number> {
+  if (!isFirebaseEnabled() || !db) return 0;
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, MATCHES_COLLECTION),
+        where('participantIds', 'array-contains', userId),
+        where('status', '==', 'completed')
+      )
+    );
+    return snap.size;
+  } catch {
+    return 0;
+  }
+}

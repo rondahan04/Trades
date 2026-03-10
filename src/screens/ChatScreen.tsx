@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,12 @@ import {
   ScrollView,
   ActivityIndicator,
   Animated,
+  Alert,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -25,6 +29,8 @@ import { fetchUserProfile, fetchItemById, fetchMatchForItem, prepareImageForChat
 import { isFirebaseEnabled } from '../config/firebase';
 import type { ChatMessage } from '../contexts/ChatContext';
 import type { User, Item } from '../utils/mockData';
+import type { ChatStackParamList } from '../navigation/ChatStack';
+import { UserInfoModal } from '../components/UserInfoModal';
 
 // ── Emoji panel data ──────────────────────────────────────────────────────────
 const EMOJIS = [
@@ -45,9 +51,12 @@ export function ChatScreen({
   route: { params: { otherUserId: string; otherUserName?: string; itemId?: string } };
 }) {
   const { otherUserId, otherUserName, itemId } = route.params;
+  const navigation = useNavigation<NativeStackNavigationProp<ChatStackParamList, 'ChatRoom'>>();
   const { getMessages, sendMessage } = useChat();
   const { user } = useAuth();
   const [myProfile, setMyProfile] = useState<User | null>(null);
+  const [showUserInfo, setShowUserInfo] = useState(false);
+  const [showTradeModal, setShowTradeModal] = useState(false);
   const [input, setInput] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
@@ -84,6 +93,30 @@ export function ChatScreen({
       .catch(() => setOtherUser({ id: otherUserId, displayName: otherUserName ?? 'Trader', email: '' }))
       .finally(() => setUserLoading(false));
   }, [otherUserId]);
+
+  // Header: info + trade buttons
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 4 }}>
+          {/* Trade button — scales icon, circular gold/navy */}
+          <TouchableOpacity
+            style={headerBtnStyles.tradeBtn}
+            onPress={() => setShowTradeModal(true)}
+          >
+            <Ionicons name="scale-outline" size={17} color="#C9A227" />
+          </TouchableOpacity>
+          {/* User info button */}
+          <TouchableOpacity
+            style={headerBtnStyles.infoBtn}
+            onPress={() => setShowUserInfo(true)}
+          >
+            <Ionicons name="information-circle-outline" size={26} color={colors.primaryDark} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [navigation]);
 
   // Fetch current user's profile (for avatar on sent messages)
   useEffect(() => {
@@ -579,6 +612,78 @@ export function ChatScreen({
           </>
         )}
       </View>
+      {/* User info modal */}
+      <UserInfoModal
+        visible={showUserInfo}
+        onClose={() => setShowUserInfo(false)}
+        user={otherUser}
+      />
+
+      {/* Trade proposal modal */}
+      <Modal
+        visible={showTradeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTradeModal(false)}
+      >
+        <View style={styles.tradeModalBackdrop}>
+          <View style={styles.tradeModalCard}>
+            <View style={styles.tradeModalHeader}>
+              <View style={styles.tradeModalLogo}>
+                <Ionicons name="scale-outline" size={28} color="#C9A227" />
+              </View>
+              <Text style={styles.tradeModalTitle}>Propose a Trade</Text>
+              <Text style={styles.tradeModalSub}>
+                Ready to make it official? Confirm you both agree on this trade.
+              </Text>
+            </View>
+
+            {(myItem || theirItem) && (
+              <View style={styles.tradeItemRow}>
+                {[
+                  myItem    ? { item: myItem,    label: 'Your item' }    : null,
+                  theirItem ? { item: theirItem, label: 'Their item' } : null,
+                ]
+                  .filter((x): x is { item: Item; label: string } => x !== null)
+                  .map(({ item, label }) => (
+                    <View key={item.id} style={styles.tradeItemBox}>
+                      {item.photos?.[0] ? (
+                        <Image source={{ uri: item.photos[0] }} style={styles.tradeItemThumb} />
+                      ) : (
+                        <View style={[styles.tradeItemThumb, styles.tradeItemThumbEmpty]}>
+                          <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                        </View>
+                      )}
+                      <Text style={styles.tradeItemLabel}>{label}</Text>
+                      <Text style={styles.tradeItemTitle} numberOfLines={1}>{item.title}</Text>
+                    </View>
+                  ))
+                }
+              </View>
+            )}
+
+            <View style={styles.tradeModalActions}>
+              <TouchableOpacity
+                style={styles.tradeCancelBtn}
+                onPress={() => setShowTradeModal(false)}
+              >
+                <Text style={styles.tradeCancelText}>Not yet</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.tradeConfirmBtn}
+                onPress={() => {
+                  setShowTradeModal(false);
+                  sendMessage(otherUserId, '🤝 I\'m ready to trade! Let\'s confirm the details.');
+                  Alert.alert('Trade Proposed!', 'Your message has been sent. Coordinate the meetup in chat.');
+                }}
+              >
+                <Ionicons name="scale-outline" size={16} color="#fff" />
+                <Text style={styles.tradeConfirmText}>Propose Trade</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -734,4 +839,61 @@ const styles = StyleSheet.create({
   audioBubble: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   audioWave: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 24 },
   audioBar: { width: 3, borderRadius: 2 },
+
+  // Trade modal
+  tradeModalBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  tradeModalCard: {
+    backgroundColor: colors.surface, borderRadius: 24,
+    padding: 24, width: '100%', gap: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2, shadowRadius: 24, elevation: 12,
+  },
+  tradeModalHeader: { alignItems: 'center', gap: 8 },
+  tradeModalLogo: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: '#0D1B3E', justifyContent: 'center', alignItems: 'center',
+  },
+  tradeModalTitle: { fontSize: 18, fontWeight: '800', color: colors.text },
+  tradeModalSub: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', lineHeight: 18 },
+  tradeItemRow: { flexDirection: 'row', gap: 12 },
+  tradeItemBox: {
+    flex: 1, backgroundColor: colors.background, borderRadius: 14,
+    padding: 10, alignItems: 'center', gap: 4,
+    borderWidth: 1, borderColor: colors.borderLight,
+  },
+  tradeItemThumb: { width: '100%', aspectRatio: 1, borderRadius: 10 },
+  tradeItemThumbEmpty: {
+    backgroundColor: colors.borderLight, justifyContent: 'center', alignItems: 'center',
+  },
+  tradeItemLabel: { fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  tradeItemTitle: { fontSize: 12, fontWeight: '600', color: colors.text, textAlign: 'center' },
+  tradeModalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  tradeCancelBtn: {
+    flex: 1, paddingVertical: 13, borderRadius: 14, alignItems: 'center',
+    borderWidth: 1, borderColor: colors.borderLight,
+  },
+  tradeCancelText: { fontSize: 15, fontWeight: '600', color: colors.textSecondary },
+  tradeConfirmBtn: {
+    flex: 2, paddingVertical: 13, borderRadius: 14,
+    backgroundColor: '#0D1B3E', flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  tradeConfirmText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+});
+
+// Header button styles (outside StyleSheet to avoid circular refs)
+const headerBtnStyles = StyleSheet.create({
+  tradeBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: '#0D1B3E',
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1.5, borderColor: '#C9A227',
+  },
+  infoBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    justifyContent: 'center', alignItems: 'center',
+  },
 });
