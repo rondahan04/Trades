@@ -19,11 +19,13 @@ import {
   fetchItemById,
   fetchSwipeCount,
   deleteItem,
-  markItemAsTraded,
+  markTradeCompleted,
+  fetchMatchForItem,
 } from '../services/dbService';
 import { isFirebaseEnabled } from '../config/firebase';
 import type { Item } from '../utils/mockData';
 import type { MyItemsStackParamList } from '../navigation/MyItemsStack';
+import { fetchUserProfile } from '../services/dbService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -71,11 +73,22 @@ export function MyItemDashboardScreen({
           onPress: async () => {
             setActionLoading(true);
             try {
-              await markItemAsTraded(itemId);
-              setItem((prev) => prev ? { ...prev } : prev);
-              Alert.alert('Done', 'Item marked as traded.', [
-                { text: 'OK', onPress: () => navigation.goBack() },
-              ]);
+              const match = await fetchMatchForItem(itemId);
+              if (match) {
+                await markTradeCompleted(match.matchId);
+                // Fetch the other trader's name for the review screen
+                const otherUser = await fetchUserProfile(match.otherUserId);
+                navigation.replace('LeaveReview', {
+                  matchId: match.matchId,
+                  revieweeId: match.otherUserId,
+                  revieweeName: otherUser?.displayName ?? undefined,
+                });
+              } else {
+                // No match found — item may not have been traded via the app
+                Alert.alert('Done', 'Item marked as traded.', [
+                  { text: 'OK', onPress: () => navigation.goBack() },
+                ]);
+              }
             } catch (e) {
               Alert.alert('Error', 'Could not update item.');
             } finally {

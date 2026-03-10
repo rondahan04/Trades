@@ -9,6 +9,7 @@ import {
   listenToConversationMessages,
   listenToUserConversations,
   fetchUserProfile,
+  fetchItemById,
   type ConversationDoc,
 } from '../services/dbService';
 
@@ -34,6 +35,7 @@ export interface Conversation {
   otherUser: User;
   lastMessage: ChatMessage | null;
   itemId: string;
+  itemPhoto?: string;
 }
 
 interface ChatContextValue {
@@ -57,6 +59,8 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
 
   const messageListenersRef = useRef<Record<string, () => void>>({});
   const fetchedUserIdsRef = useRef(new Set<string>());
+  const fetchedItemIdsRef = useRef(new Set<string>());
+  const [itemPhotos, setItemPhotos] = useState<Record<string, string>>({});
 
   const firebaseMode = isFirebaseEnabled() && !!currentUserId;
 
@@ -100,6 +104,30 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
       }
     });
   }, [firebaseMode, conversationDocs, currentUserId]);
+
+  // Firebase: fetch item first-photos for conversations we haven't resolved yet
+  useEffect(() => {
+    if (!firebaseMode || conversationDocs.length === 0) return;
+    const toFetch = conversationDocs
+      .map((d) => d.itemId)
+      .filter((id) => id && !fetchedItemIdsRef.current.has(id));
+    if (toFetch.length === 0) return;
+    toFetch.forEach((id) => fetchedItemIdsRef.current.add(id));
+    toFetch.forEach((id) => {
+      // Check mock data first (fast path)
+      const { getItemById } = require('../utils/mockData');
+      const local = getItemById(id);
+      if (local?.photos?.[0]) {
+        setItemPhotos((prev) => ({ ...prev, [id]: local.photos[0] }));
+        return;
+      }
+      fetchItemById(id).then((item) => {
+        if (item?.photos?.[0]) {
+          setItemPhotos((prev) => ({ ...prev, [id]: item.photos[0] }));
+        }
+      }).catch(() => {});
+    });
+  }, [firebaseMode, conversationDocs]);
 
   // Cleanup all message listeners on unmount
   useEffect(() => {
@@ -179,7 +207,7 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
           };
           const msgs = messagesByConv[d.id] ?? [];
           const lastMessage = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-          return { otherUser, lastMessage, itemId: d.itemId };
+          return { otherUser, lastMessage, itemId: d.itemId, itemPhoto: itemPhotos[d.itemId] };
         })
         .sort((a, b) => (b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0));
     }
@@ -217,7 +245,7 @@ export function ChatProvider({ children, currentUserId, matchIds }: ChatProvider
 
     list.sort((a, b) => (b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0));
     return list;
-  }, [currentUserId, firebaseMode, conversationDocs, messagesByConv, otherUsers, matchIds]);
+  }, [currentUserId, firebaseMode, conversationDocs, messagesByConv, otherUsers, itemPhotos, matchIds]);
 
   const value: ChatContextValue = { conversations, getMessages, sendMessage };
 

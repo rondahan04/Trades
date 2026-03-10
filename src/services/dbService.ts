@@ -163,6 +163,24 @@ export async function updateUserProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Chat image helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Resize + base64-encode an image for use in a chat message.
+ * Returns a data:image/jpeg;base64,... string safe to store in Firestore.
+ */
+export async function prepareImageForChat(uri: string): Promise<string> {
+  const resized = await manipulateAsync(
+    uri,
+    [{ resize: { width: 800 } }],
+    { compress: 0.55, format: SaveFormat.JPEG }
+  );
+  const base64 = await readAsStringAsync(resized.uri, { encoding: EncodingType.Base64 });
+  return `data:image/jpeg;base64,${base64}`;
+}
+
+// ---------------------------------------------------------------------------
 // Items
 // ---------------------------------------------------------------------------
 
@@ -205,40 +223,41 @@ export async function createItem(
 }
 
 /**
- * Fetch items for the swipe deck: valueTier == tier, status == 'active', exclude current user's items.
+ * Fetch items for the swipe deck filtered by valueTier, excluding the current user's items.
+ * Uses a single-field query (no composite index required) and filters status + ownerId in JS.
+ * Pass tier = null to fetch across all tiers.
  */
 export async function fetchSwipeDeck(
-  tier: ValueTier,
+  tier: ValueTier | null,
   currentUserId: string
 ): Promise<Item[]> {
-  if (!isFirebaseEnabled() || !db) {
-    return [];
-  }
-  const q = query(
-    collection(db, ITEMS_COLLECTION),
-    where('valueTier', '==', tier),
-    where('status', '==', 'active'),
-    where('ownerId', '!=', currentUserId),
-    orderBy('ownerId'),
-    orderBy('createdAt', 'desc'),
-    limit(50)
-  );
+  if (!isFirebaseEnabled() || !db) return [];
+
+  const base = collection(db, ITEMS_COLLECTION);
+  const q = tier
+    ? query(base, where('valueTier', '==', tier), limit(200))
+    : query(base, limit(200));
+
   const snap = await getDocs(q);
-  const items: Item[] = [];
-  snap.docs.forEach((d) => {
-    const data = d.data() as FirestoreItemDoc;
-    items.push({
-      id: d.id,
-      ownerId: data.ownerId,
-      title: data.title,
-      description: data.description,
-      photos: data.photos ?? [],
-      valueTier: data.valueTier,
-      pickupLocation: data.pickupLocation,
-      category: data.category,
+  return snap.docs
+    .filter((d) => {
+      const data = d.data();
+      const s = data.status as string | undefined;
+      return data.ownerId !== currentUserId && (!s || s === 'active');
+    })
+    .map((d) => {
+      const data = d.data() as FirestoreItemDoc;
+      return {
+        id: d.id,
+        ownerId: data.ownerId,
+        title: data.title,
+        description: data.description,
+        photos: data.photos ?? [],
+        valueTier: data.valueTier,
+        pickupLocation: data.pickupLocation,
+        category: data.category,
+      };
     });
-  });
-  return items;
 }
 
 /**
@@ -268,8 +287,7 @@ export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
   if (!isFirebaseEnabled() || !db) return [];
   const q = query(
     collection(db, ITEMS_COLLECTION),
-    where('ownerId', '==', ownerId),
-    orderBy('createdAt', 'desc')
+    where('ownerId', '==', ownerId)
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => {
@@ -379,7 +397,10 @@ export async function recordSwipe(
       query(collection(db, ITEMS_COLLECTION), where('ownerId', '==', swiperId))
     );
     const myActiveItemIds = myItemsSnap.docs
-      .filter((d) => d.data().status === 'active')
+      .filter((d) => {
+        const s = d.data().status;
+        return !s || s === 'active'; // treat missing status as active (legacy docs)
+      })
       .map((d) => d.id);
 
     // Match check: for each of my items, look up ${ownerId}_${myItemId} directly.
@@ -402,11 +423,36 @@ export async function recordSwipe(
         status: 'pending',
         createdAt: serverTimestamp(),
       });
-      // Fetch the owner's display name so the chat header shows a real name
-      const ownerProfileSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
-      const otherUserName = ownerProfileSnap.exists()
-        ? String(ownerProfileSnap.data().displayName ?? 'Trader')
-        : 'Trader';
+
+      // Best-effort: create conversation + fetch display name + notify User A.
+      // These must NOT throw — the match doc is already written and the overlay
+      // must always show for the current user.
+      const convId = getConversationId(swiperId, ownerId);
+      ensureConversation(convId, [swiperId, ownerId].sort(), targetItemId).catch((e) => {
+        if (__DEV__) console.warn('[recordSwipe] ensureConversation failed:', e);
+      });
+
+      let otherUserName = 'Trader';
+      try {
+        const ownerProfileSnap = await getDoc(doc(db, USERS_COLLECTION, ownerId));
+        if (ownerProfileSnap.exists()) {
+          const ownerData = ownerProfileSnap.data();
+          otherUserName = String(ownerData.displayName ?? 'Trader');
+          // Notify the OTHER user (User A) that they have a match
+          const ownerPushToken = String(ownerData.pushToken ?? '');
+          if (ownerPushToken) {
+            const { sendPushNotification } = await import('./notificationService');
+            sendPushNotification(
+              ownerPushToken,
+              "It's a match!",
+              'You have a new trade match. Open the app to start chatting!'
+            ).catch(() => {});
+          }
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[recordSwipe] post-match steps failed:', e);
+      }
+
       return { matched: true, otherUserId: ownerId, otherUserName, itemId: targetItemId };
     } else {
       // ── LIKE ONLY ─────────────────────────────────────────────────────────
@@ -423,7 +469,7 @@ export async function recordSwipe(
       return { matched: false };
     }
   } catch (e) {
-    if (__DEV__) console.warn('[recordSwipe] match check failed:', e);
+    console.error('[recordSwipe] match check failed:', e);
     return { matched: false };
   }
 }
@@ -431,6 +477,28 @@ export async function recordSwipe(
 // ---------------------------------------------------------------------------
 // Matches & reviews (post-trade)
 // ---------------------------------------------------------------------------
+
+/**
+ * Find the pending match that includes a given item.
+ * Returns { matchId, otherUserId } or null if no match is found.
+ */
+export async function fetchMatchForItem(
+  itemId: string
+): Promise<{ matchId: string; otherUserId: string; itemIds: string[] } | null> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) return null;
+  const uid = auth.currentUser.uid;
+  const q = query(
+    collection(db, MATCHES_COLLECTION),
+    where('itemIds', 'array-contains', itemId)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  const matchDoc = snap.docs[0];
+  const data = matchDoc.data();
+  const participants: string[] = data.participantIds ?? [];
+  const otherUserId = participants.find((id) => id !== uid) ?? '';
+  return { matchId: matchDoc.id, otherUserId, itemIds: data.itemIds ?? [] };
+}
 
 /**
  * Mark a match as completed and set involved items' status to 'traded'.
@@ -508,6 +576,24 @@ export interface ConversationDoc {
 /** Deterministic conversation ID from two user IDs. */
 export function getConversationId(uid1: string, uid2: string): string {
   return [uid1, uid2].sort().join('_');
+}
+
+/**
+ * Ensure a conversation document exists for both participants.
+ * Called at match time so the chat appears in both users' lists immediately,
+ * even before either user sends a message.
+ */
+export async function ensureConversation(
+  conversationId: string,
+  participantIds: string[],
+  itemId: string
+): Promise<void> {
+  if (!isFirebaseEnabled() || !db) return;
+  await setDoc(
+    doc(db, CONVERSATIONS_COLLECTION, conversationId),
+    { participantIds, itemId, lastMessage: null, updatedAt: serverTimestamp() },
+    { merge: true }
+  );
 }
 
 /** Send a message and create/update the conversation metadata doc. */

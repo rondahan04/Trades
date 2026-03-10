@@ -20,16 +20,25 @@ const CATEGORIES: ItemCategory[] = [
   'Electronics', 'Clothing', 'Home', 'Sports', 'Books', 'SneakerHead', 'Art', 'Other',
 ];
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function getFilteredItems(
   tier: ValueTier | 'all',
   category: ItemCategory | 'all',
   items: Item[] = MOCK_ITEMS
 ): Item[] {
-  return items.filter((i) => {
+  return shuffle(items.filter((i) => {
     const matchTier = tier === 'all' || i.valueTier === tier;
     const matchCat = category === 'all' || i.category === category;
     return matchTier && matchCat;
-  });
+  }));
 }
 
 export function SwipeDeckScreen() {
@@ -47,13 +56,17 @@ export function SwipeDeckScreen() {
   const [matchedItemId, setMatchedItemId] = useState<string | null>(null);
 
   const loadDeck = useCallback(async (tier: ValueTier | 'all') => {
-    if (isFirebaseEnabled() && user && tier !== 'all') {
+    if (isFirebaseEnabled() && user) {
       setDeckLoading(true);
       try {
-        const items = await fetchSwipeDeck(tier, user.id);
-        setDeck(items.length > 0 ? items : getFilteredItems(tier, categoryFilter));
+        const fbTier = tier === 'all' ? null : tier;
+        const items = await fetchSwipeDeck(fbTier, user.id);
+        const filtered = categoryFilter === 'all'
+          ? items
+          : items.filter((i) => i.category === categoryFilter);
+        setDeck(filtered.length > 0 ? shuffle(filtered) : getFilteredItems(tier, categoryFilter));
       } catch (e) {
-        if (__DEV__) console.warn('fetchSwipeDeck failed, using mock', e);
+        console.error('fetchSwipeDeck failed, using mock', e);
         setDeck(getFilteredItems(tier, categoryFilter));
       } finally {
         setDeckLoading(false);
@@ -68,11 +81,8 @@ export function SwipeDeckScreen() {
     loadDeck(tierFilter);
   }, [tierFilter]);
 
-  const refreshDeck = useCallback(() => {
-    loadDeck(tierFilter);
-  }, [loadDeck, tierFilter]);
-
   const onMatchOverlayDismiss = useCallback(() => {
+    const hadMatch = !!pendingMatchItemId;
     if (pendingMatchItemId) {
       addMatch(pendingMatchItemId);
       setPendingMatchItemId(null);
@@ -82,7 +92,12 @@ export function SwipeDeckScreen() {
     setMatchedItemId(null);
     setDeck((prev) => prev.slice(1));
     setShowMatchOverlay(false);
-  }, [pendingMatchItemId, addMatch]);
+    // "Maybe Later" — go to the Chat tab so they can see the new conversation
+    if (hadMatch) {
+      const tabNav = navigation.getParent<BottomTabNavigationProp<TabParamList>>();
+      tabNav?.navigate('Chat');
+    }
+  }, [pendingMatchItemId, addMatch, navigation]);
 
   const onStartChat = useCallback(() => {
     if (!matchedOtherUserId) return;
@@ -100,19 +115,21 @@ export function SwipeDeckScreen() {
     (direction: SwipeDirection) => {
       const top = deck[0];
       if (direction === 'right' && top) {
-        // Show overlay immediately (don't wait for Firestore)
-        setPendingMatchItemId(top.id);
-        setShowMatchOverlay(true);
-        // Run match check in background — updates overlay if a real match is found
         recordSwipe(top.id, direction, null)
           .then((result) => {
             if (result.matched && result.otherUserId) {
+              setPendingMatchItemId(top.id);
               setMatchedOtherUserId(result.otherUserId);
               setMatchedOtherUserName(result.otherUserName);
               setMatchedItemId(result.itemId ?? null);
+              setShowMatchOverlay(true);
+            } else {
+              setDeck((prev) => prev.slice(1));
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            setDeck((prev) => prev.slice(1));
+          });
       } else {
         if (top) recordSwipe(top.id, direction, null).catch(() => {});
         setDeck((prev) => prev.slice(1));
@@ -123,16 +140,8 @@ export function SwipeDeckScreen() {
 
   const onTierChange = useCallback((tier: ValueTier | 'all') => {
     setTierFilter(tier);
-    if (isFirebaseEnabled() && user && tier !== 'all') {
-      setDeckLoading(true);
-      fetchSwipeDeck(tier, user.id)
-        .then((items) => setDeck(items.length > 0 ? items : getFilteredItems(tier, categoryFilter)))
-        .catch(() => setDeck(getFilteredItems(tier, categoryFilter)))
-        .finally(() => setDeckLoading(false));
-    } else {
-      setDeck(getFilteredItems(tier, categoryFilter));
-    }
-  }, [categoryFilter, user]);
+    loadDeck(tier);
+  }, [loadDeck]);
 
   const onCategoryChange = useCallback((category: ItemCategory | 'all') => {
     setCategoryFilter(category);
@@ -213,11 +222,8 @@ export function SwipeDeckScreen() {
 
       {deck.length === 0 && (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>No more items in this tier</Text>
-          <Text style={styles.emptySubtext}>Change tier or reset to swipe again</Text>
-          <TouchableOpacity style={styles.resetButton} onPress={refreshDeck}>
-            <Text style={styles.resetButtonText}>Reset deck</Text>
-          </TouchableOpacity>
+          <Text style={styles.emptyText}>Nothing left to swipe</Text>
+          <Text style={styles.emptySubtext}>Check back later or try a different tier</Text>
         </View>
       )}
 
@@ -329,17 +335,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     marginTop: 4,
-  },
-  resetButton: {
-    marginTop: 20,
-    backgroundColor: colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 16,
-  },
-  resetButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textOnPrimary,
   },
 });

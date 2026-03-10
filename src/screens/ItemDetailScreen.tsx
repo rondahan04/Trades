@@ -14,13 +14,11 @@ import { colors } from '../theme';
 import { getItemById, getUserById } from '../utils/mockData';
 import { fetchItemById } from '../services/dbService';
 import { isFirebaseEnabled } from '../config/firebase';
-import { useAppData } from '../contexts';
 import { useAuth } from '../contexts';
 import type { Item } from '../utils/mockData';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const IMG_SIZE = SCREEN_WIDTH - 32;
-const STAR_SIZE = 32;
 
 export function ItemDetailScreen({
   route,
@@ -30,8 +28,6 @@ export function ItemDetailScreen({
   navigation: { goBack: () => void; getParent: () => { navigate: (tab: string, opts?: any) => void } | undefined };
 }) {
   const { itemId } = route.params;
-  const { user } = useAuth();
-  const { getRating, setRating, getUserRating } = useAppData();
   const [photoIndex, setPhotoIndex] = useState(0);
   const [item, setItem] = useState<Item | null>(() => getItemById(itemId) ?? null);
   const [loading, setLoading] = useState(false);
@@ -45,16 +41,7 @@ export function ItemDetailScreen({
       .finally(() => setLoading(false));
   }, [itemId]);
 
-  const rating = getRating(itemId);
-  const userStars = user ? getUserRating(itemId, user.id) : null;
   const owner = item ? getUserById(item.ownerId) : null;
-
-  const handleRate = useCallback(
-    (stars: number) => {
-      if (user) setRating(itemId, user.id, stars);
-    },
-    [user, itemId, setRating]
-  );
 
   if (loading) {
     return (
@@ -131,42 +118,6 @@ export function ItemDetailScreen({
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Rating</Text>
-          <View style={styles.ratingRow}>
-            <View style={styles.starsDisplay}>
-              {[1, 2, 3, 4, 5].map((s) => (
-                <Ionicons
-                  key={s}
-                  name={rating.average >= s ? 'star' : 'star-outline'}
-                  size={24}
-                  color={colors.primary}
-                />
-              ))}
-            </View>
-            <Text style={styles.ratingCount}>
-              {rating.count === 0 ? 'No ratings yet' : `${rating.average} (${rating.count})`}
-            </Text>
-          </View>
-          {user && (
-            <View style={styles.rateRow}>
-              <Text style={styles.rateLabel}>Your rating: </Text>
-              {[1, 2, 3, 4, 5].map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  onPress={() => handleRate(s)}
-                  style={styles.starButton}
-                >
-                  <Ionicons
-                    name={(userStars ?? 0) >= s ? 'star' : 'star-outline'}
-                    size={STAR_SIZE}
-                    color={colors.primary}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
       </View>
     </ScrollView>
   );
@@ -296,34 +247,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
     marginLeft: 8,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  starsDisplay: {
-    flexDirection: 'row',
-    gap: 2,
-    marginRight: 8,
-  },
-  ratingCount: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  rateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  rateLabel: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginRight: 8,
-    width: '100%',
-    marginBottom: 4,
-  },
-  starButton: {
-    padding: 4,
   },
 });

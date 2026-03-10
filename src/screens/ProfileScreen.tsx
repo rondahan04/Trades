@@ -15,11 +15,11 @@ import { doc, getDoc } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useAuth } from '../contexts';
-import { useAppData } from '../contexts';
-import { getItemById } from '../utils/mockData';
 import { getItemsByOwnerId } from '../utils/mockData';
+import type { Item } from '../utils/mockData';
 import type { ProfileStackParamList } from '../navigation/ProfileStack';
 import { db, isFirebaseEnabled } from '../config/firebase';
+import { fetchItemsByOwnerId } from '../services/dbService';
 
 const USERS_COLLECTION = 'users';
 
@@ -34,33 +34,41 @@ interface ProfileUserData {
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
-  const { matchIds } = useAppData();
   const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParamList, 'ProfileMain'>>();
   const [userData, setUserData] = useState<ProfileUserData | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [myItems, setMyItems] = useState<Item[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
 
   // Safely grab the correct ID
   const currentUserId = (user as any)?.uid || (user as any)?.id;
 
   useFocusEffect(
     useCallback(() => {
-      if (!user || !currentUserId || !isFirebaseEnabled() || !db) {
-        setUserData(user ? { 
-          displayName: user.displayName ?? null, 
-          email: user.email, 
-          bio: (user as any).bio ?? null, 
-          location: (user as any).location ?? null, 
-          profilePictureUrl: (user as any).avatarUrl ?? null 
-        } : null);
+      if (!user || !currentUserId) {
+        setUserData(null);
         setProfileLoading(false);
         return;
       }
-      
+
+      if (!isFirebaseEnabled() || !db) {
+        setUserData({
+          displayName: user.displayName ?? null,
+          email: user.email,
+          bio: (user as any).bio ?? null,
+          location: (user as any).location ?? null,
+          profilePictureUrl: (user as any).avatarUrl ?? null,
+        });
+        setMyItems(getItemsByOwnerId(currentUserId));
+        setProfileLoading(false);
+        return;
+      }
+
       let cancelled = false;
       setProfileLoading(true);
-      const userRef = doc(db, USERS_COLLECTION, currentUserId);
-      
-      getDoc(userRef)
+      setItemsLoading(true);
+
+      getDoc(doc(db, USERS_COLLECTION, currentUserId))
         .then((snap) => {
           if (cancelled) return;
           if (snap.exists()) {
@@ -83,7 +91,7 @@ export function ProfileScreen() {
           }
         })
         .catch((err) => {
-          console.error("Error fetching user profile:", err);
+          console.error('Error fetching user profile:', err);
           if (!cancelled) {
             setUserData({
               displayName: user.displayName ?? null,
@@ -94,18 +102,16 @@ export function ProfileScreen() {
             });
           }
         })
-        .finally(() => {
-          if (!cancelled) setProfileLoading(false);
-        });
-        
+        .finally(() => { if (!cancelled) setProfileLoading(false); });
+
+      fetchItemsByOwnerId(currentUserId)
+        .then((items) => { if (!cancelled) setMyItems(items); })
+        .catch(() => { if (!cancelled) setMyItems(getItemsByOwnerId(currentUserId)); })
+        .finally(() => { if (!cancelled) setItemsLoading(false); });
+
       return () => { cancelled = true; };
     }, [user, currentUserId])
   );
-
-  const myItems = currentUserId ? getItemsByOwnerId(currentUserId) : [];
-  const matchItems = matchIds
-    .map((id) => getItemById(id))
-    .filter((i): i is NonNullable<typeof i> => i != null);
 
   const handleLogout = () => {
     Alert.alert('Sign out', 'Are you sure?', [
@@ -171,41 +177,44 @@ export function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>My listed items</Text>
-        <Text style={styles.count}>{myItems.length} items</Text>
-        {myItems.length > 0 && (
-          <View style={styles.itemList}>
-            {myItems.slice(0, 5).map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.itemRow}
-                onPress={() => navigation.navigate('ProfileItemDetail', { itemId: item.id })}
-              >
-                <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
-                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            ))}
-            {myItems.length > 5 && (
-              <Text style={styles.moreText}>+{myItems.length - 5} more</Text>
-            )}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Active Listings</Text>
+          <View style={styles.countBadge}>
+            <Text style={styles.countBadgeText}>{myItems.length}</Text>
           </View>
-        )}
-      </View>
+        </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Want to trade (matches)</Text>
-        <Text style={styles.count}>{matchItems.length} items</Text>
-        {matchItems.length === 0 ? (
-          <Text style={[styles.hint, { fontStyle: 'italic' }]}>Swipe right on items to add them here.</Text>
+        {itemsLoading ? (
+          <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 12 }} />
+        ) : myItems.length === 0 ? (
+          <Text style={[styles.hint, { fontStyle: 'italic', marginTop: 8 }]}>
+            No active listings yet. Add items in the My Items tab.
+          </Text>
         ) : (
-          <View style={styles.itemList}>
-            {matchItems.map((item) => (
+          <View style={styles.listingCards}>
+            {myItems.map((item) => (
               <TouchableOpacity
                 key={item.id}
-                style={styles.itemRow}
-                onPress={() => navigation.navigate('ProfileItemDetail', { itemId: item.id })}
+                style={styles.listingCard}
+                onPress={() => navigation.navigate('ProfileItemDashboard', { itemId: item.id })}
+                activeOpacity={0.75}
               >
-                <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
+                {item.photos?.[0] ? (
+                  <Image source={{ uri: item.photos[0] }} style={styles.listingThumb} />
+                ) : (
+                  <View style={[styles.listingThumb, styles.listingThumbEmpty]}>
+                    <Ionicons name="image-outline" size={22} color={colors.textSecondary} />
+                  </View>
+                )}
+                <View style={styles.listingInfo}>
+                  <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
+                  <View style={styles.listingBadges}>
+                    <View style={styles.tierBadge}>
+                      <Text style={styles.tierText}>{item.valueTier}</Text>
+                    </View>
+                    <Text style={styles.categoryText}>{item.category}</Text>
+                  </View>
+                </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             ))}
@@ -288,40 +297,80 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 4,
   },
-  count: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 12,
+  countBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
-  itemList: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    overflow: 'hidden',
+  countBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primaryDark,
   },
-  itemRow: {
+  listingCards: {
+    gap: 10,
+  },
+  listingCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  itemTitle: {
-    fontSize: 16,
-    color: colors.text,
-    flex: 1,
-  },
-  moreText: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
     padding: 12,
-    fontSize: 14,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    gap: 12,
+  },
+  listingThumb: {
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    backgroundColor: colors.borderLight,
+  },
+  listingThumbEmpty: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listingInfo: {
+    flex: 1,
+    gap: 6,
+  },
+  listingTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  listingBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tierBadge: {
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  tierText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  categoryText: {
+    fontSize: 12,
     color: colors.textSecondary,
+    fontWeight: '500',
   },
   logoutButton: {
     flexDirection: 'row',

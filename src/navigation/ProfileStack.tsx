@@ -4,12 +4,14 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { ItemDetailScreen } from '../screens/ItemDetailScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { LeaveReviewScreen } from '../screens/LeaveReviewScreen';
+import { MyItemDashboardScreen } from '../screens/MyItemDashboardScreen';
 import type { LeaveReviewParams } from '../screens/LeaveReviewScreen';
 import { colors } from '../theme';
 
 export type ProfileStackParamList = {
   ProfileMain: undefined;
   ProfileItemDetail: { itemId: string };
+  ProfileItemDashboard: { itemId: string };
   EditProfile: undefined;
   LeaveReview: LeaveReviewParams;
 };
@@ -35,6 +37,11 @@ export function ProfileStack() {
         name="ProfileItemDetail"
         component={ItemDetailScreen}
         options={{ title: 'Item', headerShown: true }}
+      />
+      <Stack.Screen
+        name="ProfileItemDashboard"
+        component={MyItemDashboardScreen}
+        options={{ title: 'Listing', headerShown: true }}
       />
       <Stack.Screen
         name="EditProfile"

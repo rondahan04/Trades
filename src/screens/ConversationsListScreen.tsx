@@ -12,7 +12,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useChat } from '../contexts';
-import { getItemById } from '../utils/mockData';
 import type { ChatStackParamList } from '../navigation/ChatStack';
 
 export function ConversationsListScreen() {
@@ -59,17 +58,13 @@ export function ConversationsListScreen() {
                 : 'Say hi to arrange the trade'}
             </Text>
           </View>
-          {item.itemId ? (() => {
-            const convItem = getItemById(item.itemId);
-            const photoUri = convItem?.photos?.[0];
-            return photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.itemThumb} />
-            ) : (
-              <View style={[styles.itemThumb, styles.itemThumbPlaceholder]}>
-                <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
-              </View>
-            );
-          })() : null}
+          {item.itemPhoto ? (
+            <Image source={{ uri: item.itemPhoto }} style={styles.itemThumb} />
+          ) : item.itemId ? (
+            <View style={[styles.itemThumb, styles.itemThumbPlaceholder]}>
+              <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+            </View>
+          ) : null}
           <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} />
         </TouchableOpacity>
       )}
