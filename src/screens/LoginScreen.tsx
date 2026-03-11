@@ -5,8 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -32,9 +31,12 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
   };
 
   return (
-    <KeyboardAvoidingView
+    <ScrollView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      contentContainerStyle={styles.scroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bounces={false}
     >
       <View style={styles.card}>
         <Text style={styles.title}>Welcome back</Text>
@@ -79,7 +81,7 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
           <Text style={styles.linkText}>Don’t have an account? Sign up</Text>
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </ScrollView>
   );
 }
 
@@ -87,6 +89,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scroll: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },

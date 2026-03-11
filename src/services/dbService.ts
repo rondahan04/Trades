@@ -732,3 +732,114 @@ export async function fetchUserTradeCount(userId: string): Promise<number> {
     return 0;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Trade proposals
+// ---------------------------------------------------------------------------
+
+const TRADE_PROPOSALS_COLLECTION = 'tradeProposals';
+
+export interface TradeProposal {
+  id: string;
+  initiatorId: string;
+  receiverId: string;
+  itemIds: string[];
+  status: 'pending' | 'accepted' | 'declined';
+}
+
+export async function createTradeProposal(
+  initiatorId: string,
+  receiverId: string,
+  itemIds: string[]
+): Promise<string> {
+  if (!isFirebaseEnabled() || !db) throw new Error('Firebase not configured');
+  const ref = doc(collection(db, TRADE_PROPOSALS_COLLECTION));
+  await setDoc(ref, {
+    initiatorId,
+    receiverId,
+    itemIds,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function fetchTradeProposal(proposalId: string): Promise<TradeProposal | null> {
+  if (!isFirebaseEnabled() || !db) return null;
+  try {
+    const snap = await getDoc(doc(db, TRADE_PROPOSALS_COLLECTION, proposalId));
+    if (!snap.exists()) return null;
+    const d = snap.data();
+    return {
+      id: snap.id,
+      initiatorId: String(d.initiatorId ?? ''),
+      receiverId: String(d.receiverId ?? ''),
+      itemIds: (d.itemIds as string[]) ?? [],
+      status: (d.status as TradeProposal['status']) ?? 'pending',
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function acceptTradeProposal(proposalId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db) throw new Error('Firebase not configured');
+  const ref = doc(db, TRADE_PROPOSALS_COLLECTION, proposalId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Proposal not found');
+  await updateDoc(ref, { status: 'accepted' });
+  const itemIds: string[] = snap.data().itemIds ?? [];
+  for (const itemId of itemIds) {
+    try {
+      await updateDoc(doc(db, ITEMS_COLLECTION, itemId), { status: 'traded' as ItemStatus });
+    } catch (e) {
+      if (__DEV__) console.warn('[acceptTradeProposal] failed to mark item traded:', itemId, e);
+    }
+  }
+}
+
+export async function declineTradeProposal(proposalId: string): Promise<void> {
+  if (!isFirebaseEnabled() || !db) throw new Error('Firebase not configured');
+  await updateDoc(doc(db, TRADE_PROPOSALS_COLLECTION, proposalId), { status: 'declined' });
+}
+
+/**
+ * Real-time listener for pending proposals where the given user is the receiver.
+ * Fires onNew for each newly-added pending proposal document.
+ * Returns an unsubscribe function.
+ */
+export function listenToIncomingTradeProposals(
+  receiverId: string,
+  onNew: (proposal: TradeProposal) => void
+): () => void {
+  if (!isFirebaseEnabled() || !db) return () => {};
+  const q = query(
+    collection(db, TRADE_PROPOSALS_COLLECTION),
+    where('receiverId', '==', receiverId),
+    where('status', '==', 'pending')
+  );
+  return onSnapshot(q, (snap) => {
+    snap.docChanges().forEach((change) => {
+      if (change.type === 'added') {
+        const d = change.doc.data();
+        onNew({
+          id: change.doc.id,
+          initiatorId: String(d.initiatorId ?? ''),
+          receiverId: String(d.receiverId ?? ''),
+          itemIds: (d.itemIds as string[]) ?? [],
+          status: 'pending',
+        });
+      }
+    });
+  });
+}
+
+export async function fetchPushToken(userId: string): Promise<string | null> {
+  if (!isFirebaseEnabled() || !db) return null;
+  try {
+    const snap = await getDoc(doc(db, USERS_COLLECTION, userId));
+    return snap.exists() ? (String(snap.data().pushToken ?? '') || null) : null;
+  } catch {
+    return null;
+  }
+}

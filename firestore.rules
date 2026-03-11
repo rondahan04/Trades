@@ -25,6 +25,18 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Trade proposals: initiator can create; either participant can read; receiver can update status
+    match /tradeProposals/{proposalId} {
+      allow create: if request.auth != null
+        && request.resource.data.initiatorId == request.auth.uid;
+      allow read: if request.auth != null
+        && (resource.data.initiatorId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid);
+      allow update: if request.auth != null
+        && resource.data.receiverId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+    }
+
     // Reviews: authenticated users can read/create
     match /reviews/{reviewId} {
       allow read: if request.auth != null;

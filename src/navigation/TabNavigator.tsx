@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
@@ -6,6 +6,9 @@ import { SwipeStack } from './SwipeStack';
 import { MyItemsStack } from './MyItemsStack';
 import { ChatStack } from './ChatStack';
 import { ProfileStack } from './ProfileStack';
+import { useAuth } from '../contexts';
+import { savePushToken } from '../services/dbService';
+import { registerForPushNotificationsAsync } from '../services/notificationService';
 
 export type TabParamList = {
   Swipe: undefined;
@@ -17,6 +20,15 @@ export type TabParamList = {
 const Tab = createBottomTabNavigator<TabParamList>();
 
 export function TabNavigator() {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user?.id) return;
+    registerForPushNotificationsAsync()
+      .then((token) => savePushToken(user.id, token))
+      .catch(() => {});
+  }, [user?.id]);
+
   return (
     <Tab.Navigator
       screenOptions={{

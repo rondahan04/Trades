@@ -25,7 +25,12 @@ import { colors } from '../theme';
 import { useChat } from '../contexts';
 import { useAuth } from '../contexts';
 import { getUserById, getItemById } from '../utils/mockData';
-import { fetchUserProfile, fetchItemById, fetchMatchForItem, prepareImageForChat } from '../services/dbService';
+import {
+  fetchUserProfile, fetchItemById, fetchMatchForItem, prepareImageForChat,
+  createTradeProposal, acceptTradeProposal, declineTradeProposal, fetchPushToken,
+  listenToIncomingTradeProposals,
+  type TradeProposal,
+} from '../services/dbService';
 import { isFirebaseEnabled } from '../config/firebase';
 import type { ChatMessage } from '../contexts/ChatContext';
 import type { User, Item } from '../utils/mockData';
@@ -44,6 +49,7 @@ const EMOJIS = [
 // ── Message prefixes ──────────────────────────────────────────────────────────
 const IMG_PREFIX = 'data:image/';
 const AUDIO_PREFIX = 'data:audio/';
+const TRADE_PROPOSAL_PREFIX = 'data:trade/proposal:';
 
 export function ChatScreen({
   route,
@@ -71,6 +77,8 @@ export function ChatScreen({
   const dotAnim = useRef(new Animated.Value(0)).current;
   const soundRef = useRef<Audio.Sound | null>(null);
   const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
+  const shownIncomingProposalIds = useRef<Set<string>>(new Set());
+  const [incomingProposal, setIncomingProposal] = useState<TradeProposal | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const [otherUser, setOtherUser] = useState<User | null>(
     () => getUserById(otherUserId) ?? null
@@ -167,12 +175,26 @@ export function ChatScreen({
   }, [itemId]);
 
   const messages = getMessages(otherUserId);
+  // Filter out legacy trade-proposal messages (those are handled via popup now)
+  const visibleMessages = messages.filter((m) => !m.text.startsWith(TRADE_PROPOSAL_PREFIX));
 
   useEffect(() => {
-    if (messages.length > 0) {
+    if (visibleMessages.length > 0) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  }, [messages.length]);
+  }, [visibleMessages.length]);
+
+  // Listen for incoming pending trade proposals from the person we're chatting with
+  useEffect(() => {
+    if (!user?.id) return;
+    const unsub = listenToIncomingTradeProposals(user.id, (proposal) => {
+      if (proposal.initiatorId !== otherUserId) return;
+      if (shownIncomingProposalIds.current.has(proposal.id)) return;
+      shownIncomingProposalIds.current.add(proposal.id);
+      setIncomingProposal(proposal);
+    });
+    return unsub;
+  }, [user?.id, otherUserId]);
 
   const handleSend = useCallback(() => {
     if (!input.trim()) return;
@@ -210,6 +232,34 @@ export function ChatScreen({
     setInput((prev) => prev + emoji);
   }, []);
 
+  const handleAcceptTrade = useCallback(async (proposalId: string, initiatorId?: string) => {
+    try {
+      await acceptTradeProposal(proposalId);
+      sendMessage(otherUserId, '✅ Trade accepted! Let\'s arrange the meetup.');
+      const uid = initiatorId ?? otherUserId;
+      const token = await fetchPushToken(uid).catch(() => null);
+      if (token) {
+        const { sendPushNotification } = await import('../services/notificationService');
+        sendPushNotification(
+          token,
+          '✅ Trade Accepted!',
+          `${user?.displayName ?? 'Your trade partner'} accepted your trade proposal!`
+        ).catch(() => {});
+      }
+    } catch {
+      Alert.alert('Error', 'Could not accept trade. Please try again.');
+    }
+  }, [otherUserId, sendMessage, user]);
+
+  const handleDeclineTrade = useCallback(async (proposalId: string) => {
+    try {
+      await declineTradeProposal(proposalId);
+      sendMessage(otherUserId, '❌ Trade declined.');
+    } catch {
+      Alert.alert('Error', 'Could not decline trade. Please try again.');
+    }
+  }, [otherUserId, sendMessage]);
+
   const formatRecordTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -246,6 +296,7 @@ export function ChatScreen({
 
   const sendRecording = useCallback(async () => {
     if (!recordingRef.current) return;
+    const durSecs = recordingSeconds;
     try {
       setIsRecording(false);
       await recordingRef.current.stopAndUnloadAsync();
@@ -255,13 +306,13 @@ export function ChatScreen({
       setRecordingSeconds(0);
       if (!uri) return;
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-      sendMessage(otherUserId, `data:audio/m4a;base64,${base64}`);
+      sendMessage(otherUserId, `data:audio/m4a;dur=${durSecs};base64,${base64}`);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     } catch {
       recordingRef.current = null;
       setRecordingSeconds(0);
     }
-  }, [otherUserId, sendMessage]);
+  }, [otherUserId, sendMessage, recordingSeconds]);
 
   const handlePlayAudio = useCallback(async (msgId: string, dataUrl: string) => {
     // Stop current playback if playing same message
@@ -306,8 +357,8 @@ export function ChatScreen({
 
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const isMe = item.senderId === user?.id;
-    const prevMsg = messages[index - 1];
-    const nextMsg = messages[index + 1];
+    const prevMsg = visibleMessages[index - 1];
+    const nextMsg = visibleMessages[index + 1];
     const isFirstInGroup = !prevMsg || prevMsg.senderId !== item.senderId;
     const isLastInGroup = !nextMsg || nextMsg.senderId !== item.senderId;
     const isImage = item.text.startsWith(IMG_PREFIX);
@@ -366,28 +417,37 @@ export function ChatScreen({
               style={styles.audioBubble}
               onPress={() => handlePlayAudio(item.id, item.text)}
             >
-              <Ionicons
-                name={playingMsgId === item.id ? 'pause-circle' : 'play-circle'}
-                size={32}
-                color={isMe ? colors.textOnPrimary : colors.primaryDark}
-              />
-              <View style={styles.audioWave}>
-                {[4,7,10,7,5,9,6,8,4,7,10,6].map((h, i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.audioBar,
-                      {
-                        height: h * 2,
-                        backgroundColor: isMe
-                          ? 'rgba(255,255,255,0.7)'
-                          : colors.primaryDark,
-                        opacity: playingMsgId === item.id ? 1 : 0.5,
-                      },
-                    ]}
-                  />
-                ))}
+              <View style={styles.audioRow}>
+                <Ionicons
+                  name={playingMsgId === item.id ? 'pause-circle' : 'play-circle'}
+                  size={32}
+                  color={isMe ? colors.textOnPrimary : colors.primaryDark}
+                />
+                <View style={styles.audioWave}>
+                  {[4,7,10,7,5,9,6,8,4,7,10,6].map((h, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.audioBar,
+                        {
+                          height: h * 2,
+                          backgroundColor: isMe
+                            ? 'rgba(255,255,255,0.7)'
+                            : colors.primaryDark,
+                          opacity: playingMsgId === item.id ? 1 : 0.5,
+                        },
+                      ]}
+                    />
+                  ))}
+                </View>
               </View>
+              <Text style={[styles.audioDurText, isMe && styles.audioDurTextMe]}>
+                {(() => {
+                  const m = item.text.match(/;dur=(\d+);/);
+                  const secs = m ? parseInt(m[1], 10) : 0;
+                  return `🎤 ${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
+                })()}
+              </Text>
             </TouchableOpacity>
           ) : (
             <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{item.text}</Text>
@@ -428,7 +488,7 @@ export function ChatScreen({
     >
       <FlatList
         ref={flatListRef}
-        data={messages}
+        data={visibleMessages}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         renderItem={renderMessage}
@@ -671,14 +731,99 @@ export function ChatScreen({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.tradeConfirmBtn}
-                onPress={() => {
+                onPress={async () => {
                   setShowTradeModal(false);
-                  sendMessage(otherUserId, '🤝 I\'m ready to trade! Let\'s confirm the details.');
-                  Alert.alert('Trade Proposed!', 'Your message has been sent. Coordinate the meetup in chat.');
+                  if (!user?.id || !isFirebaseEnabled()) return;
+                  try {
+                    const itemIds = [myItem?.id, theirItem?.id].filter(Boolean) as string[];
+                    await createTradeProposal(user.id, otherUserId, itemIds);
+                    // Send push notification so the receiver knows to open the chat
+                    const token = await fetchPushToken(otherUserId).catch(() => null);
+                    if (token) {
+                      const { sendPushNotification } = await import('../services/notificationService');
+                      sendPushNotification(
+                        token,
+                        '🤝 Trade Proposed!',
+                        `${user?.displayName ?? 'Someone'} wants to trade with you. Open the app to accept or decline.`
+                      ).catch(() => {});
+                    }
+                  } catch {
+                    Alert.alert('Error', 'Could not send the trade proposal. Please try again.');
+                  }
                 }}
               >
                 <Ionicons name="scale-outline" size={16} color="#fff" />
                 <Text style={styles.tradeConfirmText}>Propose Trade</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Incoming trade proposal modal — shown to the receiver */}
+      <Modal
+        visible={incomingProposal !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIncomingProposal(null)}
+      >
+        <View style={styles.tradeModalBackdrop}>
+          <View style={styles.tradeModalCard}>
+            <View style={styles.tradeModalHeader}>
+              <View style={styles.tradeModalLogo}>
+                <Ionicons name="scale-outline" size={28} color="#C9A227" />
+              </View>
+              <Text style={styles.tradeModalTitle}>Trade Proposed!</Text>
+              <Text style={styles.tradeModalSub}>
+                {otherUser?.displayName ?? 'Your trade partner'} wants to trade with you. Do you accept?
+              </Text>
+            </View>
+
+            {(myItem || theirItem) && (
+              <View style={styles.tradeItemRow}>
+                {[
+                  theirItem ? { item: theirItem, label: 'Their item' } : null,
+                  myItem    ? { item: myItem,    label: 'Your item'  } : null,
+                ]
+                  .filter((x): x is { item: Item; label: string } => x !== null)
+                  .map(({ item, label }) => (
+                    <View key={item.id} style={styles.tradeItemBox}>
+                      {item.photos?.[0] ? (
+                        <Image source={{ uri: item.photos[0] }} style={styles.tradeItemThumb} />
+                      ) : (
+                        <View style={[styles.tradeItemThumb, styles.tradeItemThumbEmpty]}>
+                          <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                        </View>
+                      )}
+                      <Text style={styles.tradeItemLabel}>{label}</Text>
+                      <Text style={styles.tradeItemTitle} numberOfLines={1}>{item.title}</Text>
+                    </View>
+                  ))
+                }
+              </View>
+            )}
+
+            <View style={styles.tradeModalActions}>
+              <TouchableOpacity
+                style={styles.tradeCancelBtn}
+                onPress={() => {
+                  const p = incomingProposal;
+                  setIncomingProposal(null);
+                  if (p) handleDeclineTrade(p.id);
+                }}
+              >
+                <Text style={styles.tradeCancelText}>Decline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.tradeConfirmBtn}
+                onPress={() => {
+                  const p = incomingProposal;
+                  setIncomingProposal(null);
+                  if (p) handleAcceptTrade(p.id, p.initiatorId);
+                }}
+              >
+                <Ionicons name="checkmark" size={16} color="#fff" />
+                <Text style={styles.tradeConfirmText}>Accept Trade</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -834,11 +979,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 
+  // Trade proposal bubble — transparent wrapper, TradeBubble provides own card styling
+
   // Audio bubble
   bubbleAudio: { paddingVertical: 10, paddingHorizontal: 12 },
-  audioBubble: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  audioBubble: { flexDirection: 'column', gap: 4 },
+  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   audioWave: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 24 },
   audioBar: { width: 3, borderRadius: 2 },
+  audioDurText: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+  audioDurTextMe: { color: 'rgba(255,255,255,0.7)' },
 
   // Trade modal
   tradeModalBackdrop: {

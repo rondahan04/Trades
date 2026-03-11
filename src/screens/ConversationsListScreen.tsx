@@ -14,6 +14,12 @@ import { colors } from '../theme';
 import { useChat } from '../contexts';
 import type { ChatStackParamList } from '../navigation/ChatStack';
 
+function formatPreviewText(text: string): string {
+  if (text.startsWith('data:audio/')) return '🎤 Voice message';
+  if (text.startsWith('data:image/')) return '📷 Photo';
+  return text;
+}
+
 export function ConversationsListScreen() {
   const { conversations } = useChat();
   const navigation = useNavigation<NativeStackNavigationProp<ChatStackParamList, 'ConversationsList'>>();
@@ -53,8 +59,8 @@ export function ConversationsListScreen() {
             <Text style={styles.preview} numberOfLines={1}>
               {item.lastMessage
                 ? item.lastMessage.senderId === item.otherUser.id
-                  ? item.lastMessage.text
-                  : `You: ${item.lastMessage.text}`
+                  ? formatPreviewText(item.lastMessage.text)
+                  : `You: ${formatPreviewText(item.lastMessage.text)}`
                 : 'Say hi to arrange the trade'}
             </Text>
           </View>

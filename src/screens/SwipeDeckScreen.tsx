@@ -45,7 +45,7 @@ function insertAds(items: Item[]): DeckEntry[] {
   items.forEach((item, i) => {
     result.push(item);
     if ((i + 1) % AD_INTERVAL === 0 && i + 1 < items.length) {
-      result.push(MOCK_ADS[adIndex % MOCK_ADS.length]);
+      result.push({ ...MOCK_ADS[adIndex % MOCK_ADS.length], id: `ad-slot-${adIndex}` });
       adIndex++;
     }
   });
@@ -97,12 +97,16 @@ export function SwipeDeckScreen() {
       setDeckLoading(true);
       try {
         const fbTier = tier === 'all' ? null : tier;
-        const items = await fetchSwipeDeck(fbTier, user.id);
+        const fbItems = await fetchSwipeDeck(fbTier, user.id);
         const filtered = category === 'all'
-          ? items
-          : items.filter((i) => i.category === category);
-        const base = filtered.length > 0 ? shuffle(filtered) : getFilteredItems(tier, category);
-        setDeck(insertAds(base));
+          ? fbItems
+          : fbItems.filter((i) => i.category === category);
+        // Always pad the deck with mock items (exclude current user's items and dedupe by id)
+        const fbIds = new Set(filtered.map((i) => i.id));
+        const mockPadding = getFilteredItems(tier, category).filter(
+          (m) => !fbIds.has(m.id) && m.ownerId !== user.id
+        );
+        setDeck(insertAds(shuffle([...filtered, ...mockPadding])));
       } catch {
         setDeck(insertAds(getFilteredItems(tier, category)));
       } finally {
