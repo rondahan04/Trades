@@ -35,7 +35,8 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
     >
       <View style={styles.inner}>
         <View style={styles.logoSection}>
