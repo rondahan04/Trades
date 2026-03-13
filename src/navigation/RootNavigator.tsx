@@ -3,7 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts';
 import { AuthStack } from './AuthStack';
 import { TabNavigator } from './TabNavigator';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Image, StyleSheet } from 'react-native';
 import { colors } from '../theme';
 
 export type RootStackParamList = {
@@ -14,12 +14,16 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isFirstVisit } = useAuth();
 
   if (isLoading) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={styles.splash}>
+        <Image
+          source={require('../../assets/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       </View>
     );
   }
@@ -29,17 +33,24 @@ export function RootNavigator() {
       {user ? (
         <Stack.Screen name="Main" component={TabNavigator} />
       ) : (
-        <Stack.Screen name="Auth" component={AuthStack} />
+        <Stack.Screen name="Auth">
+          {() => <AuthStack isFirstVisit={isFirstVisit} />}
+        </Stack.Screen>
       )}
     </Stack.Navigator>
   );
 }
 
 const styles = StyleSheet.create({
-  loading: {
+  splash: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    borderRadius: 28,
   },
 });

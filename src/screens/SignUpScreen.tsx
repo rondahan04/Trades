@@ -10,10 +10,10 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { colors } from '../theme';
 import { useAuth } from '../contexts';
@@ -47,10 +47,21 @@ export function SignUpScreen({ navigation }: { navigation: { navigate: (s: strin
   };
 
   return (
-    <KeyboardAvoidingView
+    <ScrollView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      contentContainerStyle={styles.scroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      automaticallyAdjustKeyboardInsets
     >
+      <View style={styles.logoSection}>
+        <Image
+          source={require('../../assets/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.appName}>Trades</Text>
+      </View>
       <View style={styles.card}>
         <Text style={styles.title}>Create account</Text>
         <Text style={styles.subtitle}>Join Trades and start swapping</Text>
@@ -62,6 +73,7 @@ export function SignUpScreen({ navigation }: { navigation: { navigate: (s: strin
           value={displayName}
           onChangeText={setDisplayName}
           autoCapitalize="words"
+          textContentType="name"
         />
         <TextInput
           style={styles.input}
@@ -72,6 +84,7 @@ export function SignUpScreen({ navigation }: { navigation: { navigate: (s: strin
           autoCapitalize="none"
           keyboardType="email-address"
           autoComplete="email"
+          textContentType="emailAddress"
         />
         <TextInput
           style={styles.input}
@@ -81,6 +94,7 @@ export function SignUpScreen({ navigation }: { navigation: { navigate: (s: strin
           onChangeText={setPassword}
           secureTextEntry
           autoComplete="password-new"
+          textContentType="newPassword"
         />
         <TextInput
           style={styles.input}
@@ -90,6 +104,7 @@ export function SignUpScreen({ navigation }: { navigation: { navigate: (s: strin
           onChangeText={setConfirmPassword}
           secureTextEntry
           autoComplete="password-new"
+          textContentType="newPassword"
         />
 
         <TouchableOpacity
@@ -111,7 +126,7 @@ export function SignUpScreen({ navigation }: { navigation: { navigate: (s: strin
           <Text style={styles.linkText}>Already have an account? Sign in</Text>
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </ScrollView>
   );
 }
 
@@ -119,8 +134,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scroll: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
+  },
+  logoSection: {
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    marginBottom: 10,
+  },
+  appName: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.text,
+    letterSpacing: 0.5,
   },
   card: {
     backgroundColor: colors.surface,

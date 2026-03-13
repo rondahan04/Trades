@@ -290,19 +290,24 @@ export async function fetchItemsByOwnerId(ownerId: string): Promise<Item[]> {
     where('ownerId', '==', ownerId)
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => {
-    const data = d.data() as FirestoreItemDoc;
-    return {
-      id: d.id,
-      ownerId: data.ownerId,
-      title: data.title,
-      description: data.description,
-      photos: data.photos ?? [],
-      valueTier: data.valueTier,
-      pickupLocation: data.pickupLocation,
-      category: data.category,
-    };
-  });
+  return snap.docs
+    .filter((d) => {
+      const s = (d.data() as FirestoreItemDoc & { status?: string }).status;
+      return !s || s === 'active'; // exclude traded; treat missing status as active
+    })
+    .map((d) => {
+      const data = d.data() as FirestoreItemDoc;
+      return {
+        id: d.id,
+        ownerId: data.ownerId,
+        title: data.title,
+        description: data.description,
+        photos: data.photos ?? [],
+        valueTier: data.valueTier,
+        pickupLocation: data.pickupLocation,
+        category: data.category,
+      };
+    });
 }
 
 /** Count how many unique users swiped right on a given item. */
@@ -517,8 +522,13 @@ export async function markTradeCompleted(matchId: string): Promise<void> {
   await updateDoc(matchRef, { status: 'completed' });
   const itemIds: string[] = match?.itemIds ?? [];
   for (const itemId of itemIds) {
-    const itemRef = doc(db, ITEMS_COLLECTION, itemId);
-    await updateDoc(itemRef, { status: 'traded' });
+    try {
+      const itemRef = doc(db, ITEMS_COLLECTION, itemId);
+      await updateDoc(itemRef, { status: 'traded' });
+    } catch (e) {
+      // May fail for items owned by the other trader (permission denied) — that's OK.
+      if (__DEV__) console.warn('[markTradeCompleted] could not mark item traded:', itemId, e);
+    }
   }
 }
 
@@ -571,6 +581,7 @@ export interface ConversationDoc {
   participantIds: string[];
   itemId: string;
   lastMessage: { senderId: string; text: string; timestamp: number } | null;
+  archived?: boolean;
 }
 
 /** Deterministic conversation ID from two user IDs. */
@@ -657,12 +668,15 @@ export function listenToUserConversations(
   );
   return onSnapshot(q, (snap) => {
     callback(
-      snap.docs.map((d) => ({
-        id: d.id,
-        participantIds: (d.data().participantIds as string[]) ?? [],
-        itemId: String(d.data().itemId ?? ''),
-        lastMessage: d.data().lastMessage ?? null,
-      }))
+      snap.docs
+        .filter((d) => !d.data().archived)
+        .map((d) => ({
+          id: d.id,
+          participantIds: (d.data().participantIds as string[]) ?? [],
+          itemId: String(d.data().itemId ?? ''),
+          lastMessage: d.data().lastMessage ?? null,
+          archived: false,
+        }))
     );
   });
 }
@@ -787,14 +801,24 @@ export async function acceptTradeProposal(proposalId: string): Promise<void> {
   const ref = doc(db, TRADE_PROPOSALS_COLLECTION, proposalId);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Proposal not found');
+  const { initiatorId, receiverId, itemIds = [] } = snap.data() as {
+    initiatorId: string; receiverId: string; itemIds: string[];
+  };
   await updateDoc(ref, { status: 'accepted' });
-  const itemIds: string[] = snap.data().itemIds ?? [];
+  // Mark all traded items
   for (const itemId of itemIds) {
     try {
       await updateDoc(doc(db, ITEMS_COLLECTION, itemId), { status: 'traded' as ItemStatus });
     } catch (e) {
       if (__DEV__) console.warn('[acceptTradeProposal] failed to mark item traded:', itemId, e);
     }
+  }
+  // Archive the conversation between the two traders
+  try {
+    const convId = getConversationId(initiatorId, receiverId);
+    await updateDoc(doc(db, CONVERSATIONS_COLLECTION, convId), { archived: true });
+  } catch (e) {
+    if (__DEV__) console.warn('[acceptTradeProposal] failed to archive conversation:', e);
   }
 }
 
@@ -808,6 +832,31 @@ export async function declineTradeProposal(proposalId: string): Promise<void> {
  * Fires onNew for each newly-added pending proposal document.
  * Returns an unsubscribe function.
  */
+/**
+ * Real-time listener for the initiator (proposer) to detect when their
+ * outgoing proposal to a specific user has been accepted.
+ * Only fires on a status change to 'accepted' (document modified), not on initial load.
+ */
+export function listenToOutgoingProposalAccepted(
+  initiatorId: string,
+  receiverId: string,
+  onAccepted: () => void
+): () => void {
+  if (!isFirebaseEnabled() || !db) return () => {};
+  const q = query(
+    collection(db, TRADE_PROPOSALS_COLLECTION),
+    where('initiatorId', '==', initiatorId),
+    where('receiverId', '==', receiverId)
+  );
+  return onSnapshot(q, (snap) => {
+    snap.docChanges().forEach((change) => {
+      if (change.type === 'modified' && change.doc.data().status === 'accepted') {
+        onAccepted();
+      }
+    });
+  });
+}
+
 export function listenToIncomingTradeProposals(
   receiverId: string,
   onNew: (proposal: TradeProposal) => void

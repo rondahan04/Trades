@@ -13,6 +13,7 @@ import { MOCK_USERS } from '../utils/mockData';
 import { auth, db, isFirebaseEnabled } from '../config/firebase';
 
 const AUTH_KEY = '@trades_user';
+const FIRST_VISIT_KEY = '@trades_first_visit';
 const USERS_COLLECTION = 'users';
 
 /** Firestore user document shape (users collection) */
@@ -39,6 +40,7 @@ function firestoreUserToAppUser(docData: FirestoreUserDoc): User {
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
+  isFirstVisit: boolean;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   register: (email: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -51,14 +53,16 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFirstVisit, setIsFirstVisit] = useState(false);
 
   const loadStoredMockUser = useCallback(async () => {
     try {
-      const raw = await AsyncStorage.getItem(AUTH_KEY);
-      if (raw) {
-        const u = JSON.parse(raw) as User;
-        setUser(u);
-      }
+      const [raw, visited] = await Promise.all([
+        AsyncStorage.getItem(AUTH_KEY),
+        AsyncStorage.getItem(FIRST_VISIT_KEY),
+      ]);
+      if (raw) setUser(JSON.parse(raw) as User);
+      setIsFirstVisit(visited === null);
     } catch {
       // ignore
     } finally {
@@ -75,6 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
       if (!fbUser) {
+        const visited = await AsyncStorage.getItem(FIRST_VISIT_KEY).catch(() => 'yes');
+        setIsFirstVisit(visited === null);
         setUser(null);
         setIsLoading(false);
         return;
@@ -114,6 +120,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const normalized = email.trim().toLowerCase();
         await signInWithEmailAndPassword(auth, normalized, password);
+        await AsyncStorage.setItem(FIRST_VISIT_KEY, 'visited');
+        setIsFirstVisit(false);
         return { ok: true };
       } catch (err: unknown) {
         const message = err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : 'Login failed';
@@ -151,6 +159,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             profilePictureUrl: null,
           };
           await setDoc(doc(db, USERS_COLLECTION, uid), userDoc);
+          await AsyncStorage.setItem(FIRST_VISIT_KEY, 'visited');
+          setIsFirstVisit(false);
           setUser(firestoreUserToAppUser(userDoc));
           return { ok: true };
         } catch (err: unknown) {
@@ -206,6 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: AuthContextValue = {
     user,
     isLoading,
+    isFirstVisit,
     login,
     register,
     logout,

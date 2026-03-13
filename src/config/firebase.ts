@@ -1,5 +1,10 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeAuth } from "firebase/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+// Metro resolves firebase/auth to the React Native bundle which exports getReactNativePersistence.
+// TypeScript uses the web types which don't include it, so we require at runtime.
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const { getReactNativePersistence } = require("firebase/auth") as any;
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -22,8 +27,10 @@ export const app: FirebaseApp | null =
     ? initializeApp(firebaseConfig)
     : null;
 
-// Auth (persistence warning in RN is non-fatal; auth still works in-session)
-export const auth = app ? getAuth(app) : null;
+// Auth with AsyncStorage persistence so the session survives app restarts/kills.
+export const auth = app
+  ? initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) })
+  : null;
 export const db = app ? getFirestore(app) : null;
 export const storage = app ? getStorage(app) : null;
 

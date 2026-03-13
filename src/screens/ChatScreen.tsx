@@ -28,7 +28,7 @@ import { getUserById, getItemById } from '../utils/mockData';
 import {
   fetchUserProfile, fetchItemById, fetchMatchForItem, prepareImageForChat,
   createTradeProposal, acceptTradeProposal, declineTradeProposal, fetchPushToken,
-  listenToIncomingTradeProposals,
+  listenToIncomingTradeProposals, listenToOutgoingProposalAccepted,
   type TradeProposal,
 } from '../services/dbService';
 import { isFirebaseEnabled } from '../config/firebase';
@@ -196,6 +196,18 @@ export function ChatScreen({
     return unsub;
   }, [user?.id, otherUserId]);
 
+  // Listen for the OTHER user accepting a proposal WE sent (proposer side)
+  useEffect(() => {
+    if (!user?.id) return;
+    const unsub = listenToOutgoingProposalAccepted(user.id, otherUserId, () => {
+      Alert.alert(
+        'Trade Accepted!',
+        `${otherUser?.displayName ?? 'Your trade partner'} accepted your trade proposal!`
+      );
+    });
+    return unsub;
+  }, [user?.id, otherUserId, otherUser?.displayName]);
+
   const handleSend = useCallback(() => {
     if (!input.trim()) return;
     sendMessage(otherUserId, input.trim());
@@ -232,24 +244,14 @@ export function ChatScreen({
     setInput((prev) => prev + emoji);
   }, []);
 
-  const handleAcceptTrade = useCallback(async (proposalId: string, initiatorId?: string) => {
+  const handleAcceptTrade = useCallback(async (proposalId: string) => {
     try {
       await acceptTradeProposal(proposalId);
-      sendMessage(otherUserId, '✅ Trade accepted! Let\'s arrange the meetup.');
-      const uid = initiatorId ?? otherUserId;
-      const token = await fetchPushToken(uid).catch(() => null);
-      if (token) {
-        const { sendPushNotification } = await import('../services/notificationService');
-        sendPushNotification(
-          token,
-          '✅ Trade Accepted!',
-          `${user?.displayName ?? 'Your trade partner'} accepted your trade proposal!`
-        ).catch(() => {});
-      }
+      // The proposer is notified via listenToOutgoingProposalAccepted on their own device.
     } catch {
       Alert.alert('Error', 'Could not accept trade. Please try again.');
     }
-  }, [otherUserId, sendMessage, user]);
+  }, []);
 
   const handleDeclineTrade = useCallback(async (proposalId: string) => {
     try {
@@ -819,10 +821,9 @@ export function ChatScreen({
                 onPress={() => {
                   const p = incomingProposal;
                   setIncomingProposal(null);
-                  if (p) handleAcceptTrade(p.id, p.initiatorId);
+                  if (p) handleAcceptTrade(p.id);
                 }}
               >
-                <Ionicons name="checkmark" size={16} color="#fff" />
                 <Text style={styles.tradeConfirmText}>Accept Trade</Text>
               </TouchableOpacity>
             </View>

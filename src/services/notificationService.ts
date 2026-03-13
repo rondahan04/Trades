@@ -29,7 +29,7 @@ export async function sendPushNotification(expoPushToken: string, title: string,
 
   // Trigger an immediate UI alert so you can visually test the flow!
   Alert.alert(
-    `🔔 ${title}`,
+    title,
     body,
     [{ text: 'Awesome!', onPress: () => console.log('Mock notification dismissed') }]
   );

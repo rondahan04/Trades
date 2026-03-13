@@ -11,9 +11,10 @@ export type AuthStackParamList = {
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
-export function AuthStack() {
+export function AuthStack({ isFirstVisit }: { isFirstVisit: boolean }) {
   return (
     <Stack.Navigator
+      initialRouteName={isFirstVisit ? 'SignUp' : 'Login'}
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.text,
@@ -24,12 +25,12 @@ export function AuthStack() {
       <Stack.Screen
         name="Login"
         component={LoginScreen}
-        options={{ title: 'Sign in', headerShown: true }}
+        options={{ title: 'Sign in', headerShown: false }}
       />
       <Stack.Screen
         name="SignUp"
         component={SignUpScreen}
-        options={{ title: 'Sign up', headerShown: true }}
+        options={{ title: 'Sign up', headerShown: false }}
       />
     </Stack.Navigator>
   );
