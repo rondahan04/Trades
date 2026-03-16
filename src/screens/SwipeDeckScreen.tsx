@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,6 +17,8 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { isFirebaseEnabled } from '../config/firebase';
 
 // ── Ad data ───────────────────────────────────────────────────────────────────
+const AD_INTERVAL = 5;
+
 const MOCK_ADS: AdDeckItem[] = [
   {
     id: 'ad-1', isAd: true,
@@ -34,23 +36,6 @@ const MOCK_ADS: AdDeckItem[] = [
     adBody: 'Always meet in public places and use in-app chat to confirm details before meeting.',
   },
 ];
-
-type DeckEntry = Item | AdDeckItem;
-
-/** Insert one ad every AD_INTERVAL real items (after the 3rd, 8th, 13th…) */
-function insertAds(items: Item[]): DeckEntry[] {
-  const AD_INTERVAL = 5;
-  const result: DeckEntry[] = [];
-  let adIndex = 0;
-  items.forEach((item, i) => {
-    result.push(item);
-    if ((i + 1) % AD_INTERVAL === 0 && i + 1 < items.length) {
-      result.push({ ...MOCK_ADS[adIndex % MOCK_ADS.length], id: `ad-slot-${adIndex}` });
-      adIndex++;
-    }
-  });
-  return result;
-}
 
 const TIERS: ValueTier[] = ['$', '$$', '$$$'];
 const CATEGORIES: ItemCategory[] = [
@@ -84,13 +69,27 @@ export function SwipeDeckScreen() {
   const { addMatch } = useAppData();
   const [tierFilter, setTierFilter] = useState<ValueTier | 'all'>('$$');
   const [categoryFilter, setCategoryFilter] = useState<ItemCategory | 'all'>('all');
-  const [deck, setDeck] = useState<DeckEntry[]>(() => insertAds(getFilteredItems('$$', 'all')));
+  const [deck, setDeck] = useState<Item[]>(() => getFilteredItems('$$', 'all'));
   const [deckLoading, setDeckLoading] = useState(false);
   const [showMatchOverlay, setShowMatchOverlay] = useState(false);
   const [pendingMatchItemId, setPendingMatchItemId] = useState<string | null>(null);
   const [matchedOtherUserId, setMatchedOtherUserId] = useState<string | null>(null);
   const [matchedOtherUserName, setMatchedOtherUserName] = useState<string | undefined>(undefined);
   const [matchedItemId, setMatchedItemId] = useState<string | null>(null);
+  // Ad overlay — shown after every AD_INTERVAL item swipes, covers the deck entirely
+  const [adOverlay, setAdOverlay] = useState<AdDeckItem | null>(null);
+  const swipeCountRef = useRef(0);
+  const adIndexRef = useRef(0);
+
+  const advanceDeck = useCallback(() => {
+    swipeCountRef.current += 1;
+    setDeck((prev) => prev.slice(1));
+    if (swipeCountRef.current % AD_INTERVAL === 0) {
+      const ad = MOCK_ADS[adIndexRef.current % MOCK_ADS.length];
+      adIndexRef.current += 1;
+      setAdOverlay({ ...ad, id: `ad-slot-${adIndexRef.current}` });
+    }
+  }, []);
 
   const loadDeck = useCallback(async (tier: ValueTier | 'all', category: ItemCategory | 'all') => {
     if (isFirebaseEnabled() && user) {
@@ -106,14 +105,14 @@ export function SwipeDeckScreen() {
         const mockPadding = getFilteredItems(tier, category).filter(
           (m) => !fbIds.has(m.id) && m.ownerId !== user.id
         );
-        setDeck(insertAds(shuffle([...filtered, ...mockPadding])));
+        setDeck(shuffle([...filtered, ...mockPadding]));
       } catch {
-        setDeck(insertAds(getFilteredItems(tier, category)));
+        setDeck(getFilteredItems(tier, category));
       } finally {
         setDeckLoading(false);
       }
     } else {
-      setDeck(insertAds(getFilteredItems(tier, category)));
+      setDeck(getFilteredItems(tier, category));
       setDeckLoading(false);
     }
   }, [user]);
@@ -133,14 +132,14 @@ export function SwipeDeckScreen() {
     setMatchedOtherUserId(null);
     setMatchedOtherUserName(undefined);
     setMatchedItemId(null);
-    setDeck((prev) => prev.slice(1));
+    advanceDeck();
     setShowMatchOverlay(false);
     // "Maybe Later" — go to the Chat tab so they can see the new conversation
     if (hadMatch) {
       const tabNav = navigation.getParent<BottomTabNavigationProp<TabParamList>>();
       tabNav?.navigate('Chat');
     }
-  }, [pendingMatchItemId, addMatch, navigation]);
+  }, [pendingMatchItemId, addMatch, navigation, advanceDeck]);
 
   const onStartChat = useCallback(() => {
     if (!matchedOtherUserId) return;
@@ -157,7 +156,7 @@ export function SwipeDeckScreen() {
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection) => {
       const top = deck[0];
-      if (!top || 'isAd' in top) { setDeck((prev) => prev.slice(1)); return; }
+      if (!top) return;
       if (direction === 'right') {
         recordSwipe(top.id, direction, null)
           .then((result) => {
@@ -167,17 +166,18 @@ export function SwipeDeckScreen() {
               setMatchedOtherUserName(result.otherUserName);
               setMatchedItemId(result.itemId ?? null);
               setShowMatchOverlay(true);
+              // deck advance (+ possible ad) handled in onMatchOverlayDismiss
             } else {
-              setDeck((prev) => prev.slice(1));
+              advanceDeck();
             }
           })
-          .catch(() => { setDeck((prev) => prev.slice(1)); });
+          .catch(() => { advanceDeck(); });
       } else {
         recordSwipe(top.id, direction, null).catch(() => {});
-        setDeck((prev) => prev.slice(1));
+        advanceDeck();
       }
     },
-    [deck]
+    [deck, advanceDeck]
   );
 
   const onTierChange = useCallback((tier: ValueTier | 'all') => {
@@ -240,34 +240,33 @@ export function SwipeDeckScreen() {
       </ScrollView>
 
       <View style={styles.deckContainer}>
-        {deck.map((entry, index) => {
+        {deck.map((item, index) => {
           const isTop = index === 0;
           const zIndex = deck.length - index;
-          const isAd = 'isAd' in entry;
           return (
             <View
-              key={entry.id}
+              key={item.id}
               style={[styles.cardWrapper, { zIndex }]}
               pointerEvents={isTop ? 'auto' : 'none'}
             >
-              {isTop && isAd ? (
-                <AdCard
-                  ad={entry as AdDeckItem}
-                  onDismiss={() => setDeck((prev) => prev.slice(1))}
-                />
-              ) : !isAd ? (
-                <SwipeableItemCard
-                  item={entry as Item}
-                  onSwipeComplete={onSwipeComplete}
-                  onPressDetail={() => navigation.navigate('SwipeItemDetail', { itemId: entry.id })}
-                />
-              ) : (
-                // Non-top ad: render a blank placeholder for deck depth
-                <View style={styles.adPlaceholder} />
-              )}
+              <SwipeableItemCard
+                item={item}
+                onSwipeComplete={onSwipeComplete}
+                onPressDetail={() => navigation.navigate('SwipeItemDetail', { itemId: item.id })}
+              />
             </View>
           );
         })}
+
+        {/* Ad overlay — covers the entire deck so no item peeks through */}
+        {adOverlay && (
+          <View style={styles.adOverlay}>
+            <AdCard
+              ad={adOverlay}
+              onDismiss={() => setAdOverlay(null)}
+            />
+          </View>
+        )}
       </View>
 
       {deck.length === 0 && (
@@ -367,6 +366,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  adOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    backgroundColor: colors.background,
+  },
   empty: {
     position: 'absolute',
     top: 0,
@@ -385,13 +395,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     marginTop: 4,
-  },
-  adPlaceholder: {
-    width: '88%' as `${number}%`,
-    aspectRatio: 1.1,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
   },
 });

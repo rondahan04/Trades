@@ -19,6 +19,7 @@ import {
   fetchItemById,
   fetchSwipeCount,
   deleteItem,
+  markItemAsTraded,
   markTradeCompleted,
   fetchMatchForItem,
 } from '../services/dbService';
@@ -84,7 +85,8 @@ export function MyItemDashboardScreen({
                   revieweeName: otherUser?.displayName ?? undefined,
                 });
               } else {
-                // No match found — item may not have been traded via the app
+                // No match found — mark directly in Firestore then go back
+                await markItemAsTraded(itemId);
                 Alert.alert('Done', 'Item marked as traded.', [
                   { text: 'OK', onPress: () => navigation.goBack() },
                 ]);

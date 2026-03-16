@@ -49,6 +49,7 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
 
         <View style={styles.card}>
           <Text style={styles.title}>Sign in</Text>
+          <Text style={styles.subtitle}>Continue trading</Text>
 
           <TextInput
             style={styles.input}
@@ -139,8 +140,12 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: colors.text,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
     marginBottom: 20,
-    textAlign: 'center',
   },
   input: {
     backgroundColor: colors.background,

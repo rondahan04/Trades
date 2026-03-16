@@ -14,7 +14,7 @@ const Stack = createNativeStackNavigator<AuthStackParamList>();
 export function AuthStack({ isFirstVisit }: { isFirstVisit: boolean }) {
   return (
     <Stack.Navigator
-      initialRouteName={isFirstVisit ? 'SignUp' : 'Login'}
+      initialRouteName="Login"
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.text,

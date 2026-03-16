@@ -3,7 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts';
 import { AuthStack } from './AuthStack';
 import { TabNavigator } from './TabNavigator';
-import { View, Image, StyleSheet } from 'react-native';
+import { View, Image, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme';
 
 export type RootStackParamList = {
@@ -24,6 +24,7 @@ export function RootNavigator() {
           style={styles.logo}
           resizeMode="contain"
         />
+        <Text style={styles.logoText}>Trades</Text>
       </View>
     );
   }
@@ -46,11 +47,18 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: '#ffffff',
   },
   logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 28,
+    width: 100,
+    height: 100,
+    borderRadius: 22,
+  },
+  logoText: {
+    marginTop: 14,
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: 0.5,
   },
 });
