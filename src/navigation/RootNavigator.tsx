@@ -3,18 +3,20 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts';
 import { AuthStack } from './AuthStack';
 import { TabNavigator } from './TabNavigator';
+import { FirstTimeSetupScreen } from '../screens/FirstTimeSetupScreen';
 import { View, Image, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme';
 
 export type RootStackParamList = {
   Auth: undefined;
+  Setup: undefined;
   Main: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
-  const { user, isLoading, isFirstVisit } = useAuth();
+  const { user, isLoading, isFirstVisit, needsOnboarding } = useAuth();
 
   if (isLoading) {
     return (
@@ -32,7 +34,11 @@ export function RootNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {user ? (
-        <Stack.Screen name="Main" component={TabNavigator} />
+        needsOnboarding ? (
+          <Stack.Screen name="Setup" component={FirstTimeSetupScreen} />
+        ) : (
+          <Stack.Screen name="Main" component={TabNavigator} />
+        )
       ) : (
         <Stack.Screen name="Auth">
           {() => <AuthStack isFirstVisit={isFirstVisit} />}
