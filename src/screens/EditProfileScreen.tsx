@@ -32,7 +32,6 @@ export function EditProfileScreen() {
   const [bio, setBio] = useState((user as { bio?: string })?.bio ?? '');
   const [location, setLocation] = useState((user as { location?: string })?.location ?? '');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
-  const [profileImageBase64, setProfileImageBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const requestMediaPermission = async (mediaType: 'camera' | 'library') => {
@@ -55,12 +54,9 @@ export function EditProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
-      base64: true,
     });
     if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      setProfileImageUri(asset.uri);
-      setProfileImageBase64(asset.base64 ?? null);
+      setProfileImageUri(result.assets[0].uri);
     }
   };
 
@@ -75,12 +71,9 @@ export function EditProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
-      base64: true,
     });
     if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      setProfileImageUri(asset.uri);
-      setProfileImageBase64(asset.base64 ?? null);
+      setProfileImageUri(result.assets[0].uri);
     }
   };
 

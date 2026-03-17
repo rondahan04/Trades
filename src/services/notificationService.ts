@@ -5,13 +5,13 @@ import { Alert } from 'react-native';
  * This bypasses the Apple Developer requirement and Expo SDK 53 limitations.
  */
 export async function registerForPushNotificationsAsync(): Promise<string> {
-  console.log('MOCK: Requesting push notification permissions...');
+  if (__DEV__) console.log('MOCK: Requesting push notification permissions...');
 
   // Simulate network delay
   await new Promise(resolve => setTimeout(resolve, 500));
 
   const fakeToken = `MockToken_${Math.random().toString(36).substring(2, 15)}`;
-  console.log('MOCK: Generated fake push token:', fakeToken);
+  if (__DEV__) console.log('MOCK: Generated fake push token:', fakeToken);
 
   return fakeToken;
 }
@@ -21,8 +21,7 @@ export async function registerForPushNotificationsAsync(): Promise<string> {
  * Instead of going through Apple/Google, it instantly triggers an in-app UI alert.
  */
 export async function sendPushNotification(expoPushToken: string, title: string, body: string) {
-  console.log(`MOCK: Sending push notification to [${expoPushToken}]`);
-  console.log(`MOCK: Title: ${title} | Body: ${body}`);
+  if (__DEV__) console.log(`MOCK: Sending push notification to [${expoPushToken}] | Title: ${title} | Body: ${body}`);
 
   // Simulate network delay
   await new Promise(resolve => setTimeout(resolve, 800));
@@ -31,6 +30,6 @@ export async function sendPushNotification(expoPushToken: string, title: string,
   Alert.alert(
     title,
     body,
-    [{ text: 'Awesome!', onPress: () => console.log('Mock notification dismissed') }]
+    [{ text: 'Awesome!', onPress: () => { if (__DEV__) console.log('Mock notification dismissed'); } }]
   );
 }

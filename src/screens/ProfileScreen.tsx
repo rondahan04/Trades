@@ -91,7 +91,7 @@ export function ProfileScreen() {
           }
         })
         .catch((err) => {
-          console.error('Error fetching user profile:', err);
+          if (__DEV__) console.error('Error fetching user profile:', err);
           if (!cancelled) {
             setUserData({
               displayName: user.displayName ?? null,

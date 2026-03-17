@@ -5,8 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView,
   ActivityIndicator,
   Alert,
   Image,
@@ -33,12 +32,13 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
   };
 
   return (
-    <KeyboardAvoidingView
+    <ScrollView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      contentContainerStyle={styles.inner}
+      keyboardShouldPersistTaps="handled"
+      bounces={false}
     >
-      <View style={styles.inner}>
-        <View style={styles.logoSection}>
+      <View style={styles.logoSection}>
           <Image
             source={require('../../assets/icon.png')}
             style={styles.logo}
@@ -95,8 +95,7 @@ export function LoginScreen({ navigation }: { navigation: { navigate: (s: string
             <Text style={styles.linkText}>Don't have an account? Sign up</Text>
           </TouchableOpacity>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+    </ScrollView>
   );
 }
 
@@ -106,7 +105,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   inner: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },
