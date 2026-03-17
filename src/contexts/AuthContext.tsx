@@ -41,6 +41,10 @@ interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   isFirstVisit: boolean;
+  /** True immediately after registration — triggers onboarding flow. */
+  needsOnboarding: boolean;
+  /** Call after onboarding is saved to proceed to the main app. */
+  completeOnboarding: () => void;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   register: (email: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -54,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isFirstVisit, setIsFirstVisit] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   const loadStoredMockUser = useCallback(async () => {
     try {
@@ -161,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await setDoc(doc(db, USERS_COLLECTION, uid), userDoc);
           await AsyncStorage.setItem(FIRST_VISIT_KEY, 'visited');
           setIsFirstVisit(false);
+          setNeedsOnboarding(true);
           setUser(firestoreUserToAppUser(userDoc));
           return { ok: true };
         } catch (err: unknown) {
@@ -182,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
       const { password: _, ...safe } = newUser;
       const toStore = { ...safe };
+      setNeedsOnboarding(true);
       setUser(toStore as User);
       await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(toStore));
       return { ok: true };
@@ -213,10 +220,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const completeOnboarding = useCallback(() => {
+    setNeedsOnboarding(false);
+  }, []);
+
   const value: AuthContextValue = {
     user,
     isLoading,
     isFirstVisit,
+    needsOnboarding,
+    completeOnboarding,
     login,
     register,
     logout,

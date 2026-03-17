@@ -163,6 +163,33 @@ export async function updateUserProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Onboarding
+// ---------------------------------------------------------------------------
+
+export interface OnboardingProfileInput {
+  bio: string;
+  preferredCategories: string[];
+  baseLocation: string;
+  tradeRadius: number;
+}
+
+/**
+ * Persist onboarding preferences into the user's Firestore document.
+ * Merges into the existing doc so other fields (displayName, email, etc.) are preserved.
+ */
+export async function saveOnboardingProfile(data: OnboardingProfileInput): Promise<void> {
+  if (!isFirebaseEnabled() || !db || !auth?.currentUser) return;
+  const uid = auth.currentUser.uid;
+  await updateDoc(doc(db, USERS_COLLECTION, uid), {
+    bio: data.bio.trim() || null,
+    preferredCategories: data.preferredCategories,
+    location: data.baseLocation.trim() || null,
+    tradeRadius: data.tradeRadius,
+    onboardingComplete: true,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Chat image helper
 // ---------------------------------------------------------------------------
 
