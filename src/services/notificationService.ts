@@ -1,35 +1,57 @@
-import { Alert } from 'react-native';
+import { Platform } from 'react-native';
 
 /**
- * MOCK: Simulates asking the user for permission and generates a fake token.
- * This bypasses the Apple Developer requirement and Expo SDK 53 limitations.
+ * Requests push notification permission and returns the FCM device token.
+ * Requires a native build (Xcode / npx expo run:ios) — not available in Expo Go.
+ * Returns null gracefully in Expo Go so the rest of the app is unaffected.
  */
-export async function registerForPushNotificationsAsync(): Promise<string> {
-  if (__DEV__) console.log('MOCK: Requesting push notification permissions...');
+export async function registerForPushNotificationsAsync(): Promise<string | null> {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return null;
 
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 500));
+  try {
+    // Dynamic import so the module missing in Expo Go doesn't crash at load time
+    const messaging = (await import('@react-native-firebase/messaging')).default;
 
-  const fakeToken = `MockToken_${Math.random().toString(36).substring(2, 15)}`;
-  if (__DEV__) console.log('MOCK: Generated fake push token:', fakeToken);
+    const authStatus = await messaging().requestPermission();
+    const enabled =
+      authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+      authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
-  return fakeToken;
+    if (!enabled) return null;
+
+    return await messaging().getToken();
+  } catch {
+    // Native module not available (Expo Go) — silently skip
+    return null;
+  }
 }
 
 /**
- * MOCK: Simulates sending a push notification.
- * Instead of going through Apple/Google, it instantly triggers an in-app UI alert.
+ * Sets up a foreground message listener that shows an Alert for incoming chat messages.
+ * No-op in Expo Go.
  */
-export async function sendPushNotification(expoPushToken: string, title: string, body: string) {
-  if (__DEV__) console.log(`MOCK: Sending push notification to [${expoPushToken}] | Title: ${title} | Body: ${body}`);
+export async function setupForegroundMessageHandler(
+  onMessage: (title: string, body: string) => void
+): Promise<(() => void) | null> {
+  try {
+    const messaging = (await import('@react-native-firebase/messaging')).default;
+    const unsub = messaging().onMessage(async (remoteMessage) => {
+      if (remoteMessage.data?.type !== 'chat_message') return;
+      const title = remoteMessage.notification?.title ?? 'New message';
+      const body = remoteMessage.notification?.body ?? '';
+      onMessage(title, body);
+    });
+    return unsub;
+  } catch {
+    return null;
+  }
+}
 
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 800));
-
-  // Trigger an immediate UI alert so you can visually test the flow!
-  Alert.alert(
-    title,
-    body,
-    [{ text: 'Awesome!', onPress: () => { if (__DEV__) console.log('Mock notification dismissed'); } }]
-  );
+/** No-op: chat notifications are sent server-side via Cloud Function trigger. */
+export async function sendPushNotification(
+  _token: string,
+  _title: string,
+  _body: string
+): Promise<void> {
+  // Intentional no-op: server-side only.
 }

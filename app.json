@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.rondahan.Trades",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -25,13 +26,19 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rondahan.Trades",
+      "googleServicesFile": "./google-services.json"
     },
     "extra": {
       "eas": {
         "projectId": "969d5f98-48ec-40ba-bb3d-dbb94b9be0af"
       }
     },
-    "owner": "rondahan"
+    "owner": "rondahan",
+    "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging"
+    ]
   }
 }

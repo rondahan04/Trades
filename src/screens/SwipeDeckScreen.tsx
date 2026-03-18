@@ -269,10 +269,18 @@ export function SwipeDeckScreen() {
         )}
       </View>
 
-      {deck.length === 0 && (
+      {deck.length === 0 && !deckLoading && (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>Nothing left to swipe</Text>
-          <Text style={styles.emptySubtext}>Check back later or try a different tier</Text>
+          <Text style={styles.emptyText}>You've seen it all</Text>
+          <Text style={styles.emptySubtext}>
+            New listings show up as people add them.{'\n'}Check back later.
+          </Text>
+          <TouchableOpacity
+            style={styles.refreshButton}
+            onPress={() => loadDeck(tierFilter, categoryFilter)}
+          >
+            <Text style={styles.refreshButtonText}>Refresh</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -385,15 +393,32 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 40,
   },
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: colors.text,
+    marginBottom: 10,
+    letterSpacing: -0.3,
   },
   emptySubtext: {
     fontSize: 14,
     color: colors.textSecondary,
-    marginTop: 4,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 32,
+  },
+  refreshButton: {
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    paddingHorizontal: 24,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  refreshButtonText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

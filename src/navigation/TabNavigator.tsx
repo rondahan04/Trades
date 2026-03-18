@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Alert } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
@@ -8,7 +9,7 @@ import { ChatStack } from './ChatStack';
 import { ProfileStack } from './ProfileStack';
 import { useAuth } from '../contexts';
 import { savePushToken } from '../services/dbService';
-import { registerForPushNotificationsAsync } from '../services/notificationService';
+import { registerForPushNotificationsAsync, setupForegroundMessageHandler } from '../services/notificationService';
 
 export type TabParamList = {
   Swipe: undefined;
@@ -22,12 +23,21 @@ const Tab = createBottomTabNavigator<TabParamList>();
 export function TabNavigator() {
   const { user } = useAuth();
 
+  // Register FCM token (no-op in Expo Go, works in native build)
   useEffect(() => {
     if (!user?.id) return;
     registerForPushNotificationsAsync()
-      .then((token) => savePushToken(user.id, token))
+      .then((token) => { if (token) savePushToken(user.id, token); })
       .catch(() => {});
   }, [user?.id]);
+
+  // Foreground message handler (no-op in Expo Go, works in native build)
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    setupForegroundMessageHandler((title, body) => Alert.alert(title, body))
+      .then((unsub) => { cleanup = unsub; });
+    return () => { cleanup?.(); };
+  }, []);
 
   return (
     <Tab.Navigator
